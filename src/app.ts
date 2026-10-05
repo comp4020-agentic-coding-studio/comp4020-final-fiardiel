@@ -41,6 +41,12 @@ export function createHandler(store: Store) {
     try {
       await route(store, req, res);
     } catch (error) {
+      if (res.headersSent) {
+        // A response has already started; a second one cannot be written.
+        console.error(error);
+        res.destroy();
+        return;
+      }
       if (error instanceof HttpError) {
         res.setHeader("connection", "close");
         sendHtml(res, error.status, messagePage("That didn't work", error.message));

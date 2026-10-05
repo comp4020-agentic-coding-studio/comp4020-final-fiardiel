@@ -1,7 +1,7 @@
 import { readFileSync } from "node:fs";
 import type { IncomingMessage, ServerResponse } from "node:http";
 import { NAME_MAX } from "./names.ts";
-import { homePage, joinPage, kitchenPage, messagePage } from "./pages.ts";
+import { handoffPage, homePage, joinPage, kitchenPage, messagePage } from "./pages.ts";
 import type { KitchenView } from "./pages.ts";
 import { renderReadmePage } from "./readme.ts";
 import { cookingNow, kitchenState, lastCooked, responsible } from "./rules.ts";
@@ -171,6 +171,36 @@ async function house(
 
   if (method === "GET" && action === "") {
     return sendHtml(res, 200, kitchenPage(viewFor(store, code, me)));
+  }
+  if (method === "GET" && action === "handoff") {
+    return sendHtml(res, 200, handoffPage(code));
+  }
+  if (method === "POST" && action === "cook") {
+    const form = await readForm(req);
+    const choice = form.get("action");
+    if (choice === "start") {
+      store.startCooking(code, me.id);
+      return redirect(res, `/h/${code}`);
+    }
+    if (choice === "stop") {
+      store.stopCooking(code, me.id);
+      return redirect(res, `/h/${code}/handoff`);
+    }
+    if (choice === "end") {
+      // Anyone in the house can end a session someone forgot. Only that
+      // person's open session in this house can end, so a stray id ends nothing.
+      const id = Number(form.get("person") ?? "");
+      if (!Number.isInteger(id) || id <= 0) throw new HttpError(400, "That person isn't in this house.");
+      store.stopCooking(code, id);
+      return redirect(res, `/h/${code}`);
+    }
+    throw new HttpError(400, "Choose start, stop or end.");
+  }
+  if (method === "POST" && action === "mark") {
+    const state = (await readForm(req)).get("state");
+    if (state !== "clean" && state !== "messy") throw new HttpError(400, "Choose clean or messy.");
+    store.mark(code, me.id, state);
+    return redirect(res, `/h/${code}`);
   }
   return notFound(res);
 }

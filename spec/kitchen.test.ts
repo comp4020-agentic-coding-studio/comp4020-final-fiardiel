@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { buttonsOf, cookingListOf, joinAs, kitchen, newHouse, personIdOf, post, send, textOf } from "./helpers.ts";
+import { buttonsOf, cookingListOf, joinAs, kitchen, newHouse, personIdOf, post, press, send, textOf } from "./helpers.ts";
 
 async function house(...names: string[]) {
   const code = await newHouse();
@@ -56,10 +56,61 @@ describe("cooking", () => {
     expect(textOf(await kitchen(code, cookies.Rafi))).toContain("Left by Dani.");
   });
 
+  it("will not end a session in another house, even with a real person id", async () => {
+    const a = await house("Dani");
+    const b = await house("Rafi");
+    await cook(a.code, a.cookies.Dani, "start");
+
+    const res = await post(`/h/${b.code}/cook`, b.cookies.Rafi, {
+      action: "end",
+      person: await personIdOf(a.code, "Dani"),
+    });
+    expect(res.status).toBe(303);
+    expect(cookingListOf(await kitchen(a.code, a.cookies.Dani))).toEqual(["Dani"]);
+  });
+
   it("answers an end with no usable person with a 400", async () => {
     const { code, cookies } = await house("Dani");
     expect((await post(`/h/${code}/cook`, cookies.Dani, { action: "end", person: "abc" })).status).toBe(400);
     expect((await post(`/h/${code}/cook`, cookies.Dani, { action: "end" })).status).toBe(400);
+  });
+});
+
+describe("pressing the buttons the page renders", () => {
+  it("runs a whole cook, hand-off and clean-up through the page's own forms", async () => {
+    const { code, cookies } = await house("Dani", "Rafi");
+
+    const start = await press(await kitchen(code, cookies.Rafi), "I'm cooking", cookies.Rafi);
+    expect(start.status).toBe(303);
+    const cooking = await kitchen(code, cookies.Rafi);
+    expect(cookingListOf(cooking)).toEqual(["Rafi"]);
+    expect(buttonsOf(cooking)).toContain("I'm done");
+
+    const done = await press(cooking, "I'm done", cookies.Rafi);
+    expect(done.status).toBe(303);
+    expect(done.headers.get("location")).toBe(`/h/${code}/handoff`);
+
+    const handoff = await (await send(`/h/${code}/handoff`, { cookie: cookies.Rafi })).text();
+    expect((await press(handoff, "Left it messy", cookies.Rafi)).status).toBe(303);
+
+    const danis = await kitchen(code, cookies.Dani);
+    expect(textOf(danis)).toContain("Left by Rafi.");
+    expect(buttonsOf(danis)).toContain("Mark clean");
+    expect((await press(danis, "Mark clean", cookies.Dani)).status).toBe(303);
+
+    const after = textOf(await kitchen(code, cookies.Dani));
+    expect(after).toContain("The kitchen is clean");
+    expect(after).not.toContain("Left by");
+  });
+
+  it("ends someone else's session with the button the page renders", async () => {
+    const { code, cookies } = await house("Dani", "Rafi");
+    await press(await kitchen(code, cookies.Rafi), "I'm cooking", cookies.Rafi);
+
+    const danis = await kitchen(code, cookies.Dani);
+    expect(buttonsOf(danis)).toContain("End Rafi's session");
+    expect((await press(danis, "End Rafi's session", cookies.Dani)).status).toBe(303);
+    expect(cookingListOf(await kitchen(code, cookies.Dani))).toEqual([]);
   });
 });
 

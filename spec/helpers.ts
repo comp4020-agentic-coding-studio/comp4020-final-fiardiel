@@ -63,6 +63,21 @@ export async function kitchen(code: string, cookie: string): Promise<string> {
   return res.text();
 }
 
+// Press a button the way a browser would: find the button by its label, take its
+// form's action and hidden fields, and post them. Throws when the label is absent
+// or ambiguous, so a renamed button fails the check.
+export async function press(html: string, label: string, cookie: string): Promise<Response> {
+  const doc = parse(html);
+  const forms = [...doc.querySelectorAll("form")].filter(
+    (f) => f.querySelector("button")?.textContent === label,
+  );
+  if (forms.length !== 1) throw new Error(`expected one button labelled ${JSON.stringify(label)}, found ${forms.length}`);
+  const form = forms[0];
+  const fields: Form = {};
+  for (const input of form.querySelectorAll<HTMLInputElement>("input[name]")) fields[input.name] = input.value;
+  return send(form.getAttribute("action") ?? "", { cookie, form: fields });
+}
+
 // The id behind a name, read off the join page's "that's me" buttons.
 export async function personIdOf(code: string, name: string): Promise<string> {
   const doc = parse(await (await send(`/h/${code}/join`)).text());

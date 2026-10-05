@@ -9,9 +9,10 @@ const port = Number.isInteger(requestedPort) && requestedPort > 0 && requestedPo
 const dataDir = process.env.DATA_DIR ?? "data";
 
 const store = new Store(join(dataDir, "kitchen.db"));
-const server = createServer(createHandler(store));
+const server = createServer({ connectionsCheckingInterval: 2000 }, createHandler(store));
 // A request that has not fully arrived after this long is dropped. This covers the
 // time to receive the request, not the response, so long-lived responses are unaffected.
+// Node checks for stalled requests every 2 seconds, so one is dropped after about 15 s.
 server.headersTimeout = 10_000;
 server.requestTimeout = 15_000;
 server.listen(port, "0.0.0.0", () => {

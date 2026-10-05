@@ -2,7 +2,7 @@ import { randomBytes, randomInt } from "node:crypto";
 import { mkdirSync } from "node:fs";
 import { dirname } from "node:path";
 import { DatabaseSync } from "node:sqlite";
-import { normaliseName } from "./names.ts";
+import { nameKey, normaliseName } from "./names.ts";
 import { kitchenState } from "./rules.ts";
 import type { KitchenState, Mark, Session } from "./rules.ts";
 
@@ -88,7 +88,7 @@ export class Store {
     if (!this.houseExists(code)) return { ok: false, reason: "no_house" };
     const name = normaliseName(rawName);
     if (name === null) return { ok: false, reason: "invalid_name" };
-    const key = name.toLowerCase();
+    const key = nameKey(name);
     const taken = this.db.prepare("select 1 from people where house_code = ? and name_key = ?").get(code, key);
     if (taken !== undefined) return { ok: false, reason: "name_taken" };
     const token = randomBytes(24).toString("hex");

@@ -54,6 +54,21 @@ describe("joining", () => {
     expect(store.join(b, "dani").ok).toBe(true);
   });
 
+  it("treats look-alike names as taken: invisible characters and accent forms", () => {
+    const store = memory();
+    const code = store.createHouse();
+    joinOk(store, code, "Dani");
+    expect(store.join(code, "Dani\u00ad")).toEqual({ ok: false, reason: "name_taken" });
+    joinOk(store, code, "Am\u00e9");
+    expect(store.join(code, "Ame\u0301")).toEqual({ ok: false, reason: "name_taken" });
+  });
+
+  it("rejects a name that is only an invisible character", () => {
+    const store = memory();
+    const code = store.createHouse();
+    expect(store.join(code, "\u200b")).toEqual({ ok: false, reason: "invalid_name" });
+  });
+
   it("reports an unknown house", () => {
     expect(memory().join("ZZZZZZ", "Dani")).toEqual({ ok: false, reason: "no_house" });
   });
@@ -145,6 +160,16 @@ describe("house scoping", () => {
     const outsider = joinOk(store, b, "Dani");
     expect(store.mark(a, outsider.person.id, "messy")).toBe(false);
     expect(store.history(a).marks).toHaveLength(0);
+  });
+
+  it("refuses to end a session in another house's name", () => {
+    const store = memory();
+    const a = store.createHouse();
+    const b = store.createHouse();
+    const dani = joinOk(store, a, "Dani");
+    store.startCooking(a, dani.person.id);
+    expect(store.stopCooking(b, dani.person.id)).toBe(false);
+    expect(store.history(a).sessions[0].endedAt).toBeNull();
   });
 
   it("returns false, without throwing, for an unknown house", () => {

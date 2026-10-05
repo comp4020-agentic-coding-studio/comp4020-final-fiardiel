@@ -67,12 +67,18 @@ function postForm(action: string, fields: Record<string, string>, label: string)
 
 const alertLine = (message?: string): string => (message ? `<p role="alert">${esc(message)}</p>` : "");
 
-export function homePage(message?: string): string {
+export function homePage(message?: string, mine: { code: string; name: string }[] = []): string {
+  const houses =
+    mine.length === 0
+      ? ""
+      : `
+      <h2>Your houses</h2>
+      <ul>${mine.map((h) => `<li><a href="/h/${esc(h.code)}">${esc(h.code)}</a> as <strong>${esc(h.name)}</strong></li>`).join("")}</ul>`;
   return layout(
     "Kitchen",
     `      <h1>Kitchen</h1>
       <p>See who is cooking in your house, and whether the kitchen was left clean.</p>
-      ${alertLine(message)}
+      ${alertLine(message)}${houses}
       <form method="post" action="/houses">
         <button type="submit">Start a new house</button>
       </form>
@@ -83,7 +89,12 @@ export function homePage(message?: string): string {
   );
 }
 
-export function joinPage(code: string, people: Person[], message?: string): string {
+export function joinPage(code: string, people: Person[], message?: string, current: Person | null = null): string {
+  const already =
+    current === null
+      ? ""
+      : `
+      <p>You're already in this house as <strong>${esc(current.name)}</strong>. <a href="/h/${esc(code)}">Go to the kitchen</a></p>`;
   const claims =
     people.length === 0
       ? ""
@@ -93,7 +104,7 @@ export function joinPage(code: string, people: Person[], message?: string): stri
   return layout(
     "Join",
     `      <h1>Join house ${esc(code)}</h1>
-      <p>Share this code with your housemates: <strong>${esc(code)}</strong></p>
+      <p>Share this code with your housemates: <strong>${esc(code)}</strong></p>${already}
       ${alertLine(message)}
       <form method="post" action="/h/${esc(code)}/join">
         <label>Your name <input name="name" required maxlength="${NAME_MAX}" autocomplete="off" /></label>
@@ -127,7 +138,7 @@ export function kitchenPage(view: KitchenView): string {
   return layout(
     "Kitchen",
     `      <h1>Kitchen</h1>
-      <p class="quiet">House <strong>${esc(view.code)}</strong> · you are <strong>${esc(view.me.name)}</strong></p>
+      <p class="quiet">House <strong>${esc(view.code)}</strong> · you are <strong>${esc(view.me.name)}</strong> · <a href="${esc(base)}/join">Not you?</a></p>
       <h2>Cooking now</h2>
       ${cooking}
       <h2>The kitchen is ${view.state}</h2>

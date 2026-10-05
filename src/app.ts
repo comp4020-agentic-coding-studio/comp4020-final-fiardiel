@@ -68,6 +68,20 @@ function readCookie(req: IncomingMessage, name: string): string | undefined {
   return undefined;
 }
 
+// Every house this browser has a person in. Cookies that are garbage, stale or
+// for another house's token identify nobody and are dropped.
+function myHouses(store: Store, req: IncomingMessage): { code: string; name: string }[] {
+  const found: { code: string; name: string }[] = [];
+  for (const part of (req.headers.cookie ?? "").split(";")) {
+    const [key, ...rest] = part.trim().split("=");
+    const code = key.match(/^person_([23456789A-HJ-NP-Z]{6})$/)?.[1];
+    if (code === undefined) continue;
+    const person = store.personByToken(code, rest.join("="));
+    if (person !== null) found.push({ code, name: person.name });
+  }
+  return found;
+}
+
 function cookieFor(req: IncomingMessage, code: string, token: string): string {
   const secure = req.headers["x-forwarded-proto"] === "https" ? "; Secure" : "";
   return `${cookieName(code)}=${token}; Path=/; HttpOnly; SameSite=Lax; Max-Age=31536000${secure}`;
@@ -112,11 +126,12 @@ export function createHandler(store: Store) {
 }
 
 async function route(store: Store, req: IncomingMessage, res: ServerResponse): Promise<void> {
-  const method = req.method ?? "GET";
+  // Node leaves the body off a HEAD response, so HEAD is routed as GET.
+  const method = req.method === "HEAD" ? "GET" : (req.method ?? "GET");
   const url = parseUrl(req.url);
   const path = url.pathname;
 
-  if (method === "GET" && path === "/") return sendHtml(res, 200, homePage());
+  if (method === "GET" && path === "/") return sendHtml(res, 200, homePage(undefined, myHouses(store, req)));
   if (method === "GET" && path === "/readme") return redirect(res, "/readme/");
   if (method === "GET" && path === "/readme/") {
     return sendHtml(res, 200, renderReadmePage(readFileSync(README, "utf8")));
@@ -125,7 +140,7 @@ async function route(store: Store, req: IncomingMessage, res: ServerResponse): P
   if (method === "GET" && path === "/join") {
     const code = (url.searchParams.get("code") ?? "").replace(/\s+/g, "").toUpperCase();
     if (CODE_RE.test(code) && store.houseExists(code)) return redirect(res, `/h/${code}/join`);
-    return sendHtml(res, 404, homePage(NO_SUCH_HOUSE));
+    return sendHtml(res, 404, homePage(NO_SUCH_HOUSE, myHouses(store, req)));
   }
 
   const match = path.match(/^\/h\/([^/]+)(?:\/([a-z]+))?\/?$/);
@@ -146,7 +161,8 @@ async function house(
   action: string,
 ): Promise<void> {
   if (method === "GET" && action === "join") {
-    return sendHtml(res, 200, joinPage(code, store.people(code)));
+    const current = store.personByToken(code, readCookie(req, cookieName(code)) ?? "");
+    return sendHtml(res, 200, joinPage(code, store.people(code), undefined, current));
   }
   if (method === "POST" && action === "join") {
     const outcome = store.join(code, (await readForm(req)).get("name") ?? "");

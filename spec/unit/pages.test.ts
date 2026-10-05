@@ -44,6 +44,19 @@ describe("kitchen page", () => {
     expect(text(html)).toContain("<img src=x onerror=alert(1)>");
   });
 
+  it("shows the person who left it messy as text, never as markup", () => {
+    const html = kitchenPage(view({ state: "messy", responsible: { id: 9, name: "<img src=x onerror=alert(1)>" } }));
+    expect(doc(html).querySelector("img")).toBeNull();
+    expect(text(html)).toContain("<img src=x onerror=alert(1)>");
+  });
+
+  it("links to the join page from the \"you are\" line, as a link and not a button", () => {
+    const html = kitchenPage(view());
+    const link = doc(html).querySelector('a[href="/h/ABC234/join"]');
+    expect(link?.textContent).toBe("Not you?");
+    expect(buttons(html)).not.toContain("Not you?");
+  });
+
   it("says who is cooking now, or that nobody is", () => {
     expect(text(kitchenPage(view()))).toContain("Nobody right now.");
     const html = kitchenPage(view({ cooking: [dani, rafi] }));
@@ -102,6 +115,23 @@ describe("join page", () => {
     expect(text(html)).toContain("<b>x</b>");
   });
 
+  it("recognises a returning person, only when told who they are", () => {
+    const known = joinPage("ABC234", [dani], undefined, dani);
+    expect(text(known)).toContain("You're already in this house as Dani");
+    expect(doc(known).querySelector('a[href="/h/ABC234"]')).not.toBeNull();
+    expect(buttons(known)).toEqual(["Join", "Dani"]); // the other forms stay
+    const unknown = joinPage("ABC234", [dani]);
+    expect(text(unknown)).not.toContain("already in this house");
+    expect(doc(unknown).querySelector('a[href="/h/ABC234"]')).toBeNull();
+  });
+
+  it("escapes the name of a returning person", () => {
+    const html = joinPage("ABC234", [], undefined, { id: 9, name: "<b>x</b>" });
+    expect(doc(html).querySelector("strong b")).toBeNull();
+    expect(doc(html).querySelector("b")).toBeNull();
+    expect(text(html)).toContain("<b>x</b>");
+  });
+
   it("has no claim list for an empty house", () => {
     expect(buttons(joinPage("ABC234", []))).toEqual(["Join"]);
   });
@@ -110,6 +140,25 @@ describe("join page", () => {
 describe("home page", () => {
   it("offers to start or join a house", () => {
     expect(buttons(homePage())).toEqual(["Start a new house", "Join"]);
+  });
+
+  it("lists your houses only when there are some, linking to each", () => {
+    expect(text(homePage())).not.toContain("Your houses");
+    expect(text(homePage("oops", []))).not.toContain("Your houses");
+    const html = homePage(undefined, [
+      { code: "ABC234", name: "Dani" },
+      { code: "XYZ789", name: "Rafi" },
+    ]);
+    expect(text(html)).toContain("Your houses");
+    expect(doc(html).querySelector('a[href="/h/ABC234"]')?.textContent).toBe("ABC234");
+    expect(doc(html).querySelector('a[href="/h/XYZ789"]')).not.toBeNull();
+    expect(text(html)).toContain("as Dani");
+  });
+
+  it("escapes the names in your houses", () => {
+    const html = homePage(undefined, [{ code: "ABC234", name: "<b>x</b>" }]);
+    expect(doc(html).querySelector("b")).toBeNull();
+    expect(text(html)).toContain("<b>x</b>");
   });
 
   it("shows a message when given one", () => {

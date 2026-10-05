@@ -27,6 +27,11 @@ describe("the site", () => {
     expect(doc.querySelector("article h1, article h2, article h3")).not.toBeNull();
   });
 
+  it("answers HEAD requests like GET", async () => {
+    expect((await send("/", { method: "HEAD" })).status).toBe(200);
+    expect((await send("/readme/", { method: "HEAD" })).status).toBe(200);
+  });
+
   it("redirects /readme to /readme/", async () => {
     const res = await send("/readme");
     expect(res.status).toBe(303);

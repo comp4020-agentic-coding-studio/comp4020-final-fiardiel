@@ -15,4 +15,4 @@ These come from the argument in `README.md`. If a change would break one, stop a
 - Run `pnpm check` (typecheck plus every check in `spec/`) against the running app, and `pnpm check:evidence`, before saying anything is done.
 - A rule that matters is a check in `spec/`. When the agent gets something wrong, the fix goes into this file or into `spec/` as a failing check first, not just a retry.
 - The stack is Node 24 running TypeScript directly (erasable syntax only, `.ts` imports), built-in `node:sqlite` on `/data`, and no frontend framework. Do not add a dependency without saying why.
-- `README.md`, `PROCESS.md`, `CLAUDE.md` and `reflections/` are my own writing. Help find sources, check claims against the app and run checks, but do not draft their prose.
+- `README.md` and `reflections/` are my own writing. Help find sources, check claims against the app and run checks, but do not draft their prose. `PROCESS.md` and the rules in this file were drafted by the agent from my answers and decisions in the session.

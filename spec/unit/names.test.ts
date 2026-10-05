@@ -1,3 +1,4 @@
+import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
 import { NAME_MAX, nameKey, normaliseName } from "../../src/names.ts";
 
@@ -28,6 +29,16 @@ describe("normaliseName", () => {
   it("rejects bidirectional override and isolate controls", () => {
     expect(normaliseName("a\u202eb")).toBeNull();
     expect(normaliseName("a\u2066b")).toBeNull();
+  });
+
+  it("refuses all nine bidirectional controls, written as escapes in the source", () => {
+    const controls = [0x202a, 0x202b, 0x202c, 0x202d, 0x202e, 0x2066, 0x2067, 0x2068, 0x2069];
+    for (const point of controls) {
+      expect(normaliseName(`a${String.fromCodePoint(point)}b`), point.toString(16)).toBeNull();
+    }
+    // A maintainer must be able to read the pattern, so no raw control may sit in the file.
+    const source = readFileSync(new URL("../../src/names.ts", import.meta.url), "utf8");
+    expect(/[\u202a-\u202e\u2066-\u2069]/u.test(source)).toBe(false);
   });
 
   it("gives composed and decomposed accents the same name", () => {

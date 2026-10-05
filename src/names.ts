@@ -1,7 +1,7 @@
 export const NAME_MAX = 24;
 
 // Bidirectional override and isolate controls can scramble the page around a name.
-const BIDI_CONTROLS = /[‪-‮⁦-⁩]/u;
+const BIDI_CONTROLS = /[\u202a-\u202e\u2066-\u2069]/u;
 
 // Names are shown to everyone in the house, so they are trimmed, collapsed to
 // single spaces, composed to one Unicode form and length-limited. Null means

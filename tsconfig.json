@@ -14,7 +14,11 @@
     "noEmit": true,
     "skipLibCheck": true,
     "moduleDetection": "force",
-    "verbatimModuleSyntax": true
+    "verbatimModuleSyntax": true,
+    // Node runs the .ts files directly by stripping types, so syntax that
+    // needs a real compile (enum, namespace, parameter properties) must not
+    // creep in.
+    "erasableSyntaxOnly": true
   },
-  "include": ["*.ts", "spec", "scripts"]
+  "include": ["*.ts", "spec", "scripts", "src"]
 }

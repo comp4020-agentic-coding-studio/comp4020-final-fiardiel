@@ -146,6 +146,12 @@ async function route(store: Store, req: IncomingMessage, res: ServerResponse): P
   const match = path.match(/^\/h\/([^/]+)(?:\/([a-z]+))?\/?$/);
   if (match === null) return notFound(res);
   const [, code, action = ""] = match;
+  // The home form upper-cases what people type, so a lower-case code in an address
+  // is sent to the upper-case one. Only reading is redirected: a POST stays a 404.
+  const upper = code.toUpperCase();
+  if (method === "GET" && code !== upper && CODE_RE.test(upper)) {
+    return redirect(res, action === "" ? `/h/${upper}` : `/h/${upper}/${action}`);
+  }
   if (!CODE_RE.test(code) || !store.houseExists(code)) {
     return sendHtml(res, 404, messagePage("No such house", NO_SUCH_HOUSE));
   }
@@ -160,8 +166,8 @@ async function house(
   method: string,
   action: string,
 ): Promise<void> {
+  const current = store.personByToken(code, readCookie(req, cookieName(code)) ?? "");
   if (method === "GET" && action === "join") {
-    const current = store.personByToken(code, readCookie(req, cookieName(code)) ?? "");
     return sendHtml(res, 200, joinPage(code, store.people(code), undefined, current));
   }
   if (method === "POST" && action === "join") {
@@ -169,10 +175,10 @@ async function house(
     if (outcome.ok) return redirect(res, `/h/${code}`, cookieFor(req, code, outcome.token));
     if (outcome.reason === "invalid_name") {
       const message = `Pick a name of 1 to ${NAME_MAX} characters, without control characters.`;
-      return sendHtml(res, 400, joinPage(code, store.people(code), message));
+      return sendHtml(res, 400, joinPage(code, store.people(code), message, current));
     }
     const taken = "That name is taken. If it's you, tap it below, or pick another.";
-    return sendHtml(res, 409, joinPage(code, store.people(code), taken));
+    return sendHtml(res, 409, joinPage(code, store.people(code), taken, current));
   }
   if (method === "POST" && action === "claim") {
     const id = Number((await readForm(req)).get("person"));
@@ -182,7 +188,7 @@ async function house(
   }
 
   // Everything below needs to know who is acting.
-  const me = store.personByToken(code, readCookie(req, cookieName(code)) ?? "");
+  const me = current;
   if (me === null) return redirect(res, `/h/${code}/join`);
 
   if (method === "GET" && action === "") {

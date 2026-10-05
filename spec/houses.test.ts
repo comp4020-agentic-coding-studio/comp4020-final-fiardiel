@@ -26,10 +26,45 @@ describe("starting and finding a house", () => {
   });
 
   it("treats a malformed code in the path as no house, not an error", async () => {
-    for (const bad of ["x", "ABC", "<script>", "%00", "abcdef"]) {
+    for (const bad of ["x", "ABC", "<script>", "%00"]) {
       const res = await send(`/h/${encodeURIComponent(bad)}`);
       expect(res.status, bad).toBe(404);
     }
+  });
+
+  it("sends a lower-case code in a path to the upper-case one, for reading only", async () => {
+    const code = await newHouse();
+    const lower = code.toLowerCase();
+
+    const join = await send(`/h/${lower}/join`);
+    expect(join.status).toBe(303);
+    expect(join.headers.get("location")).toBe(`/h/${code}/join`);
+    expect((await send(join.headers.get("location") ?? "")).status).toBe(200);
+
+    const home = await send(`/h/${lower}`);
+    expect(home.status).toBe(303);
+    expect(home.headers.get("location")).toBe(`/h/${code}`);
+  });
+
+  it("redirects a lower-case code of a house that does not exist, then says there is none", async () => {
+    const res = await send("/h/zzzzzz/join");
+    expect(res.status).toBe(303);
+    const target = res.headers.get("location") ?? "";
+    expect(target).toBe("/h/ZZZZZZ/join");
+    expect((await send(target)).status).toBe(404);
+  });
+
+  it("does not act on a lower-case code in a POST", async () => {
+    const code = await newHouse();
+    const res = await send(`/h/${code.toLowerCase()}/join`, { form: { name: "Dani" } });
+    expect(res.status).toBe(404);
+    expect(await personIdOf(code, "Dani").catch(() => null)).toBeNull();
+  });
+
+  it("does not redirect a path that is no code even in upper case", async () => {
+    const res = await send("/h/%3Cscript%3E");
+    expect(res.status).toBe(404);
+    expect(res.headers.get("location")).toBeNull();
   });
 
   it("finds a house from a code typed in lower case with spaces around it", async () => {
@@ -79,6 +114,23 @@ describe("being someone in a house", () => {
     expect(textOf(stranger)).not.toContain("already in this house as");
     const garbage = await (await send(`/h/${code}/join`, { cookie: `person_${code}=nonsense` })).text();
     expect(textOf(garbage)).not.toContain("already in this house as");
+  });
+
+  it("keeps the already-in-this-house banner on the join page's error answers", async () => {
+    const code = await newHouse();
+    const cookie = await joinAs(code, "Dani");
+
+    const invalid = await send(`/h/${code}/join`, { cookie, form: { name: "   " } });
+    expect(invalid.status).toBe(400);
+    expect(textOf(await invalid.text())).toContain("already in this house as Dani");
+
+    const taken = await send(`/h/${code}/join`, { cookie, form: { name: "dani" } });
+    expect(taken.status).toBe(409);
+    expect(textOf(await taken.text())).toContain("already in this house as Dani");
+
+    const stranger = await send(`/h/${code}/join`, { form: { name: "   " } });
+    expect(stranger.status).toBe(400);
+    expect(textOf(await stranger.text())).not.toContain("already in this house");
   });
 
   it("lists your houses on the home page, and none for a stranger or a garbage cookie", async () => {

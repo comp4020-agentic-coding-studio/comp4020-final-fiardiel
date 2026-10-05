@@ -139,11 +139,17 @@ Three screens, phone-first and usable on desktop, with real buttons for the
 keyboard pass.
 
 - **Join:** start a new house (the app gives a code to share) or join one with
-  its code, then choose a name.
+  its code, then choose a name. The home page lists the houses this browser
+  already knows you in, and the join page of such a house says "you're already
+  in this house as <name>" with a link to the kitchen, so coming back by the
+  site's address works as well as coming back by the kitchen's address.
 - **Kitchen:** who is cooking now; the kitchen's state, clean or messy; the
-  responsible person only while messy; a quiet "last cooked: name". Buttons:
-  "I'm cooking", "I'm done", "mark clean", "mark messy", and beside each other
-  person who is cooking, a button to end their session.
+  responsible person only while messy; a quiet "last cooked: name"; a "Not you?"
+  link back to the join page. Buttons: "I'm cooking", "I'm done", "mark clean",
+  "mark messy", and beside each other person who is cooking, a button to end
+  their session. Only the ones that change something are shown: the cooking
+  button swaps between "I'm cooking" and "I'm done", and the mark button swaps
+  between "mark messy" and "mark clean".
 - **`/readme/`:** the README rendered in full.
 
 "I'm done" immediately asks "left it clean or messy?" with two buttons, so the
@@ -159,15 +165,23 @@ current state.
 
 - Unknown house code: a clear message.
 - Name taken in that house: offer "that's me" or pick another name.
-- Starting while already cooking, stopping or ending a session that has already
-  ended, or marking the state it is already in: harmless, and the response is
-  the current state.
+- Starting while already cooking, ending someone else's session that has
+  already ended, or marking the state it is already in: harmless, and the
+  response is the current state.
+- Pressing "I'm done" when you have no open session still asks "left it clean
+  or messy?". The page may be stale (for example, a housemate ended your session
+  while you were away), and you still need to hand the kitchen over.
 - Two people acting at the same moment (both marking messy, or both ending the
   same session): SQLite applies the writes one at a time, and the second is a
   harmless repeat. The result is the same as if they had acted one after the
   other.
 - Names are trimmed, length-limited and escaped in the page, because other
-  people see them.
+  people see them. They are also normalised (Unicode NFC) and must contain at
+  least one visible character. Control characters and bidirectional-override
+  characters are refused. Two names that look the same once case and invisible
+  characters are ignored count as the same name, so the "that's me" buttons
+  never show two identical-looking names. Characters that emoji need (such as
+  the zero-width joiner) stay allowed.
 - Restarts lose nothing, because all data is in SQLite on `/data`.
 
 ## 8. Checks (`spec/`)

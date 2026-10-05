@@ -1,10 +1,16 @@
 import { readFileSync } from "node:fs";
 import type { IncomingMessage, ServerResponse } from "node:http";
-import { homePage, messagePage } from "./pages.ts";
+import { NAME_MAX } from "./names.ts";
+import { homePage, joinPage, kitchenPage, messagePage } from "./pages.ts";
+import type { KitchenView } from "./pages.ts";
 import { renderReadmePage } from "./readme.ts";
-import type { Store } from "./store.ts";
+import { cookingNow, kitchenState, lastCooked, responsible } from "./rules.ts";
+import type { Person, Store } from "./store.ts";
 
 const README = new URL("../README.md", import.meta.url);
+const CODE_RE = /^[23456789A-HJ-NP-Z]{6}$/;
+const MAX_BODY = 4096;
+const NO_SUCH_HOUSE = "There's no house with that code. Check it and try again.";
 
 export class HttpError extends Error {
   status: number;
@@ -36,6 +42,53 @@ function notFound(res: ServerResponse): void {
   sendHtml(res, 404, messagePage("Not found", "There's nothing at this address."));
 }
 
+// Form bodies here are a few short fields, so anything bigger is refused. The
+// rest of an oversized body is read and thrown away before refusing: leaving
+// the loop early would destroy the socket and the 413 would never be sent.
+async function readForm(req: IncomingMessage): Promise<URLSearchParams> {
+  const chunks: Buffer[] = [];
+  let size = 0;
+  for await (const chunk of req) {
+    size += (chunk as Buffer).length;
+    if (size <= MAX_BODY) chunks.push(chunk as Buffer);
+  }
+  if (size > MAX_BODY) throw new HttpError(413, "That request is too large.");
+  return new URLSearchParams(Buffer.concat(chunks).toString("utf8"));
+}
+
+function cookieName(code: string): string {
+  return `person_${code}`;
+}
+
+function readCookie(req: IncomingMessage, name: string): string | undefined {
+  for (const part of (req.headers.cookie ?? "").split(";")) {
+    const [key, ...rest] = part.trim().split("=");
+    if (key === name) return rest.join("=");
+  }
+  return undefined;
+}
+
+function cookieFor(req: IncomingMessage, code: string, token: string): string {
+  const secure = req.headers["x-forwarded-proto"] === "https" ? "; Secure" : "";
+  return `${cookieName(code)}=${token}; Path=/; HttpOnly; SameSite=Lax; Max-Age=31536000${secure}`;
+}
+
+function viewFor(store: Store, code: string, me: Person): KitchenView {
+  const history = store.history(code);
+  const people = new Map<number, Person>(store.people(code).map((p) => [p.id, p] as const));
+  const named = (id: number | null): Person | null => (id === null ? null : (people.get(id) ?? null));
+  const cooking = cookingNow(history.sessions);
+  return {
+    code,
+    me,
+    cooking: cooking.map((id) => people.get(id)).filter((p): p is Person => p !== undefined),
+    state: kitchenState(history.marks),
+    responsible: named(responsible(history.sessions, history.marks)),
+    lastCooked: named(lastCooked(history.sessions)),
+    iAmCooking: cooking.includes(me.id),
+  };
+}
+
 export function createHandler(store: Store) {
   return async (req: IncomingMessage, res: ServerResponse): Promise<void> => {
     try {
@@ -58,14 +111,66 @@ export function createHandler(store: Store) {
   };
 }
 
-async function route(_store: Store, req: IncomingMessage, res: ServerResponse): Promise<void> {
+async function route(store: Store, req: IncomingMessage, res: ServerResponse): Promise<void> {
   const method = req.method ?? "GET";
-  const path = parseUrl(req.url).pathname;
+  const url = parseUrl(req.url);
+  const path = url.pathname;
 
   if (method === "GET" && path === "/") return sendHtml(res, 200, homePage());
   if (method === "GET" && path === "/readme") return redirect(res, "/readme/");
   if (method === "GET" && path === "/readme/") {
     return sendHtml(res, 200, renderReadmePage(readFileSync(README, "utf8")));
+  }
+  if (method === "POST" && path === "/houses") return redirect(res, `/h/${store.createHouse()}/join`);
+  if (method === "GET" && path === "/join") {
+    const code = (url.searchParams.get("code") ?? "").replace(/\s+/g, "").toUpperCase();
+    if (CODE_RE.test(code) && store.houseExists(code)) return redirect(res, `/h/${code}/join`);
+    return sendHtml(res, 404, homePage(NO_SUCH_HOUSE));
+  }
+
+  const match = path.match(/^\/h\/([^/]+)(?:\/([a-z]+))?\/?$/);
+  if (match === null) return notFound(res);
+  const [, code, action = ""] = match;
+  if (!CODE_RE.test(code) || !store.houseExists(code)) {
+    return sendHtml(res, 404, messagePage("No such house", NO_SUCH_HOUSE));
+  }
+  return house(store, req, res, code, method, action);
+}
+
+async function house(
+  store: Store,
+  req: IncomingMessage,
+  res: ServerResponse,
+  code: string,
+  method: string,
+  action: string,
+): Promise<void> {
+  if (method === "GET" && action === "join") {
+    return sendHtml(res, 200, joinPage(code, store.people(code)));
+  }
+  if (method === "POST" && action === "join") {
+    const outcome = store.join(code, (await readForm(req)).get("name") ?? "");
+    if (outcome.ok) return redirect(res, `/h/${code}`, cookieFor(req, code, outcome.token));
+    if (outcome.reason === "invalid_name") {
+      const message = `Pick a name of 1 to ${NAME_MAX} characters, without control characters.`;
+      return sendHtml(res, 400, joinPage(code, store.people(code), message));
+    }
+    const taken = "That name is taken. If it's you, tap it below, or pick another.";
+    return sendHtml(res, 409, joinPage(code, store.people(code), taken));
+  }
+  if (method === "POST" && action === "claim") {
+    const id = Number((await readForm(req)).get("person"));
+    const claimed = Number.isInteger(id) ? store.claim(code, id) : null;
+    if (claimed === null) throw new HttpError(400, "That name isn't in this house.");
+    return redirect(res, `/h/${code}`, cookieFor(req, code, claimed.token));
+  }
+
+  // Everything below needs to know who is acting.
+  const me = store.personByToken(code, readCookie(req, cookieName(code)) ?? "");
+  if (me === null) return redirect(res, `/h/${code}/join`);
+
+  if (method === "GET" && action === "") {
+    return sendHtml(res, 200, kitchenPage(viewFor(store, code, me)));
   }
   return notFound(res);
 }

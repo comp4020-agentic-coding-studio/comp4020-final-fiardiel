@@ -121,6 +121,10 @@ export class Store {
     return rows.map((r) => ({ id: r.id, name: r.name }));
   }
 
+  private inHouse(code: string, personId: number): boolean {
+    return this.db.prepare("select 1 from people where id = ? and house_code = ?").get(personId, code) !== undefined;
+  }
+
   private openSession(code: string, personId: number): { id: number } | undefined {
     return this.db
       .prepare("select id from cook_sessions where house_code = ? and person_id = ? and ended_at is null")
@@ -128,6 +132,7 @@ export class Store {
   }
 
   startCooking(code: string, personId: number): boolean {
+    if (!this.inHouse(code, personId)) return false;
     if (this.openSession(code, personId) !== undefined) return false;
     this.db
       .prepare("insert into cook_sessions (house_code, person_id, started_at) values (?, ?, ?)")
@@ -145,6 +150,7 @@ export class Store {
   // A mark that repeats the current state records nothing. A repeat would
   // otherwise restart the mess and could move the blame to a later cook.
   mark(code: string, personId: number, state: KitchenState): boolean {
+    if (!this.inHouse(code, personId)) return false;
     if (kitchenState(this.history(code).marks) === state) return false;
     this.db
       .prepare("insert into kitchen_marks (house_code, state, marked_by, marked_at) values (?, ?, ?, ?)")

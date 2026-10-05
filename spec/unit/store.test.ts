@@ -128,6 +128,46 @@ describe("cooking and marking", () => {
   });
 });
 
+describe("house scoping", () => {
+  it("refuses to start cooking for a person from another house", () => {
+    const store = memory();
+    const a = store.createHouse();
+    const b = store.createHouse();
+    const outsider = joinOk(store, b, "Dani");
+    expect(store.startCooking(a, outsider.person.id)).toBe(false);
+    expect(store.history(a).sessions).toHaveLength(0);
+  });
+
+  it("refuses to record a mark from a person in another house", () => {
+    const store = memory();
+    const a = store.createHouse();
+    const b = store.createHouse();
+    const outsider = joinOk(store, b, "Dani");
+    expect(store.mark(a, outsider.person.id, "messy")).toBe(false);
+    expect(store.history(a).marks).toHaveLength(0);
+  });
+
+  it("returns false, without throwing, for an unknown house", () => {
+    const store = memory();
+    const b = store.createHouse();
+    const dani = joinOk(store, b, "Dani");
+    expect(store.startCooking("ZZZZZZ", dani.person.id)).toBe(false);
+    expect(store.mark("ZZZZZZ", dani.person.id, "messy")).toBe(false);
+  });
+
+  it("keeps each house's history separate", () => {
+    const store = memory();
+    const a = store.createHouse();
+    const b = store.createHouse();
+    const dani = joinOk(store, b, "Dani");
+    store.startCooking(b, dani.person.id);
+    store.mark(b, dani.person.id, "messy");
+    expect(store.history(a)).toEqual({ sessions: [], marks: [] });
+    expect(store.history(b).sessions).toHaveLength(1);
+    expect(store.history(b).marks).toHaveLength(1);
+  });
+});
+
 describe("persistence", () => {
   it("keeps everything across a restart", () => {
     const dir = mkdtempSync(join(tmpdir(), "kitchen-"));

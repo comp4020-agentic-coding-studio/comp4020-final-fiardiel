@@ -70,7 +70,11 @@ describe("bills", () => {
     expect((await post(`/h/${code}/delete`, cookies.Dina, { bill: id })).status).toBe(403);
     expect((await post(`/h/${code}/delete`, cookies.Rafi, { bill: id })).status).toBe(303);
     expect(balancesOf(await housePage(code, cookies.Dina))).toEqual([]);
-    expect((await post(`/h/${code}/delete`, cookies.Rafi, { bill: id })).status).toBe(404);
+    const again = await post(`/h/${code}/delete`, cookies.Rafi, { bill: id });
+    expect(again.status).toBe(404);
+    const html = await again.text();
+    expect(textOf(html)).toContain("isn't here any more");
+    expect(textOf(html)).toContain("Nobody owes anybody.");
   });
 });
 
@@ -114,6 +118,10 @@ describe("payments", () => {
       post(`/h/${code}/answer`, cookies.Rafi, { payment: id, answer: "rejected" }),
     ]);
     expect(answers.map((r) => r.status).sort()).toEqual([303, 409]);
+    // The slower tap counted nothing, but the person is shown how things now stand.
+    const late = await answers.find((r) => r.status === 409)!.text();
+    expect(textOf(late)).toContain("already answered");
+    expect(textOf(late)).toContain("Nobody owes anybody.");
   });
 
   it("does not let another house answer or see a payment", async () => {

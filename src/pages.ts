@@ -18,6 +18,8 @@ export type HouseView = {
   waiting: { to: Person; cents: number }[];
   history: Entry[];
   draft?: Draft;
+  // Said once, above everything, e.g. when a tap arrived after someone else's.
+  notice?: string;
 };
 
 const ESCAPES: Record<string, string> = {
@@ -143,9 +145,24 @@ const LIVE_SCRIPT = `
       live = next;
     }
   }
-  const events = new EventSource(base + "/events");
-  events.addEventListener("changed", () => refresh().catch(() => {}));
-  events.addEventListener("open", () => refresh().catch(() => {}));
+  // The browser retries a dropped stream by itself, but gives up for good when
+  // a retry gets an error page (a deploy, a restart). Then a new stream is
+  // started, waiting a little longer each time.
+  let wait = 2000;
+  function connect() {
+    const events = new EventSource(base + "/events");
+    events.addEventListener("changed", () => refresh().catch(() => {}));
+    events.addEventListener("open", () => {
+      wait = 2000;
+      refresh().catch(() => {});
+    });
+    events.addEventListener("error", () => {
+      if (events.readyState !== EventSource.CLOSED) return;
+      setTimeout(connect, wait);
+      wait = Math.min(wait * 2, 60000);
+    });
+  }
+  connect();
 `;
 
 function balanceLine(b: { person: Person; cents: number }): string {
@@ -219,6 +236,7 @@ export function housePage(view: HouseView): string {
     "Serumah",
     `      <h1>Serumah</h1>
       <p class="quiet">House <strong>${esc(view.code)}</strong> · you are <strong>${esc(view.me.name)}</strong> · <a href="${esc(base)}/join">Not you?</a></p>
+      ${view.notice ? `<p role="status">${esc(view.notice)}</p>` : ""}
       <section id="live" data-base="${esc(base)}">
         <h2>Balances</h2>
         ${balances}${toAnswer}${waiting}

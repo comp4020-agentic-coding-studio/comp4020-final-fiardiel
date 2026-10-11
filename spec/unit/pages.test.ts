@@ -240,3 +240,60 @@ describe("home page", () => {
     expect(text(homePage("No such house"))).toContain("No such house");
   });
 });
+
+describe("live script", () => {
+  // Runs the page's own script in jsdom with a stand-in EventSource and timers
+  // that fire at once, so reconnecting can be watched without a server.
+  function run() {
+    const sources: { url: string; readyState: number; listeners: Record<string, (() => void)[]> }[] = [];
+    class FakeEventSource {
+      static CLOSED = 2;
+      url: string;
+      readyState = 0;
+      listeners: Record<string, (() => void)[]> = {};
+      constructor(url: string) {
+        this.url = url;
+        sources.push(this);
+      }
+      addEventListener(type: string, fn: () => void) {
+        (this.listeners[type] ??= []).push(fn);
+      }
+      close() {
+        this.readyState = 2;
+      }
+    }
+    new JSDOM(housePage(house()), {
+      runScripts: "dangerously",
+      beforeParse(window) {
+        Object.assign(window, {
+          EventSource: FakeEventSource,
+          fetch: () => new Promise(() => {}),
+          setTimeout: (fn: () => void) => {
+            fn();
+            return 0;
+          },
+        });
+      },
+    });
+    return sources;
+  }
+
+  it("opens a stream for its own house", () => {
+    expect(run().map((s) => s.url)).toEqual(["/h/ABC234/events"]);
+  });
+
+  it("starts a new stream when the browser gives up on one", () => {
+    const sources = run();
+    sources[0].readyState = 2;
+    for (const fn of sources[0].listeners.error ?? []) fn();
+    expect(sources).toHaveLength(2);
+    expect(sources[1].url).toBe("/h/ABC234/events");
+  });
+
+  it("leaves a stream the browser is still retrying alone", () => {
+    const sources = run();
+    sources[0].readyState = 0;
+    for (const fn of sources[0].listeners.error ?? []) fn();
+    expect(sources).toHaveLength(1);
+  });
+});

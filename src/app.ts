@@ -281,7 +281,10 @@ async function house(
   if (method === "POST" && action === "delete") {
     const id = idFrom((await readForm(req)).get("bill"));
     const outcome = id === null ? "gone" : store.deleteBill(code, id, me.id);
-    if (outcome === "gone") throw new HttpError(404, "That bill isn't here any more.");
+    // Gone already, most likely a second tap: say so over the house as it now stands.
+    if (outcome === "gone") {
+      return sendHtml(res, 404, housePage({ ...viewFor(store, code, me), notice: "That bill isn't here any more." }));
+    }
     if (outcome === "not_yours") throw new HttpError(403, "Only the person who paid can delete a bill.");
     hub.broadcast(code);
     return redirect(res, `/h/${code}`);
@@ -305,8 +308,10 @@ async function house(
     const outcome = id === null ? "gone" : store.answerPayment(code, id, me.id, answer);
     if (outcome === "gone") throw new HttpError(404, "That payment isn't in this house.");
     if (outcome === "not_yours") throw new HttpError(403, "Only the person who was paid can answer this.");
+    // A second tap, or a second device, arrived after the first answer. Nothing
+    // changes; the person sees the house as it now stands.
     if (outcome === "already") {
-      throw new HttpError(409, "That payment was already answered. Go back to your house to see how things stand.");
+      return sendHtml(res, 409, housePage({ ...viewFor(store, code, me), notice: "That payment was already answered." }));
     }
     hub.broadcast(code);
     return redirect(res, `/h/${code}`);

@@ -79,12 +79,14 @@ These are the author's decisions.
   it done and the turn passes on; no clock, no "overdue". Swapping a turn waits
   for the other person to accept.
 - **Editing a bill**: the payer gets an edit button on their own bill.
-- **Forms on their own page** (the author's idea after trying the redesign):
-  "Add a bill" and "Record a payment" open as their own page (or a sheet) from
-  a button on the house page, so the house page is only balances and history.
-  Less on one screen means less to take in.
-- **Short history, with the rest on its own page** (same): the house page shows
-  only the 5 most recent entries, with "See all history" opening the full list.
+- ~~**Forms on their own page**~~ (built 2026-10-11; the author's idea after
+  trying the redesign): "+ Add a bill" and "Record a payment" are buttons under
+  the totals that open their own page, with a way back, so the house page is
+  only balances and history. Less on one screen means less to take in. A
+  mistake keeps what was typed, on that page.
+- ~~**Short history, with the rest on its own page**~~ (built 2026-10-11, same):
+  the house page shows the 5 most recent entries, with "See all history (N)"
+  opening the full list, which updates live like the house page.
 - **Reading receipts (OCR)**, to fill the amount boxes.
 
 ### Not built, with reasons for the README

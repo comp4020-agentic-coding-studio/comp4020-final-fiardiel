@@ -15,7 +15,6 @@ export type HouseView = {
   // Non-zero only, in name order. Positive: they owe me. Negative: I owe them.
   balances: { person: Person; cents: number }[];
   history: Entry[];
-  draft?: Draft;
   // Said once, above everything, e.g. when a tap arrived after someone else's.
   notice?: string;
 };
@@ -121,6 +120,15 @@ const STYLE = `
   input[type="checkbox"] { width: 1.25rem; min-height: 1.25rem; margin: 0; accent-color: var(--accent); }
   button { border: 0; padding: 0 1.25rem; border-radius: 999px; background: var(--accent); color: var(--on-accent); font-weight: 700; cursor: pointer; }
   button.secondary { background: transparent; color: var(--accent); border: 1.5px solid var(--accent); }
+
+  /* The two things people come to do, as buttons that open their own page. */
+  .do { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 0.5rem; margin-top: 0.75rem; }
+  a.button { display: flex; align-items: center; justify-content: center; min-height: 2.75rem; padding: 0 1rem; border-radius: 999px; background: var(--accent); color: var(--on-accent); font-weight: 700; text-decoration: none; text-align: center; }
+  a.button.secondary { background: transparent; color: var(--accent); border: 1.5px solid var(--accent); }
+  .back { margin: 0 0 0.5rem; }
+  h2.page { font-size: 1.25rem; margin: 0.75rem 0 0.5rem; }
+  .back a, .more a { font-weight: 650; text-decoration: none; }
+  .more { margin: 0.6rem 0 0; text-align: center; }
   /* "Add bill" comes first in the page so Enter adds the bill, but it shows
      last, after "Split equally", in the order people use them. */
   form.card > button { order: 1; width: 100%; margin-top: 0.75rem; }
@@ -219,37 +227,22 @@ export function joinPage(code: string, people: Person[], message?: string, curre
 }
 
 // Live updates: the server says "changed" on this house's event stream, and
-// the page fetches itself again and swaps in the new #live section. The forms
-// sit outside #live, so a half-typed bill is never wiped. The page also
-// re-fetches whenever the stream (re)opens, so someone coming back, or whose
-// connection dropped, sees the current state. Without script, every form still
-// works; only the live updates are lost.
+// the page fetches itself again (the house page or the full history) and swaps
+// in the new #live section. The forms have pages of their own, so nothing typed
+// is ever wiped. The page also re-fetches whenever the stream (re)opens, so
+// someone coming back, or whose connection dropped, sees the current state.
+// Without script, everything still works; only the live updates are lost.
 const LIVE_SCRIPT = `
   let live = document.getElementById("live");
   const base = live.dataset.base;
+  const page = live.dataset.page;
   async function refresh() {
-    const res = await fetch(base, { cache: "no-store" });
+    const res = await fetch(page, { cache: "no-store" });
     if (!res.ok) return;
-    const page = new DOMParser().parseFromString(await res.text(), "text/html");
-    const next = page.getElementById("live");
+    const next = new DOMParser().parseFromString(await res.text(), "text/html").getElementById("live");
     if (!next) return;
-    const joined = next.dataset.people !== live.dataset.people;
     live.replaceWith(next);
     live = next;
-    // Someone joined: the forms need them too. Forms nobody has typed in are
-    // swapped for fresh ones; otherwise what was typed stays and a note asks
-    // for a reload once it's sent.
-    if (joined) {
-      const forms = document.getElementById("forms");
-      if (untouched(forms)) forms.replaceWith(page.getElementById("forms"));
-      else document.getElementById("stale").hidden = false;
-    }
-  }
-  function untouched(forms) {
-    for (const input of forms.querySelectorAll("input")) {
-      if (input.type === "checkbox" ? !input.checked : input.type !== "hidden" && input.value !== "") return false;
-    }
-    return true;
   }
   // The browser retries a dropped stream by itself, but gives up for good when
   // a retry gets an error page (a deploy, a restart). Then a new stream is
@@ -319,75 +312,122 @@ function entryLine(entry: Entry, base: string, me: Person): string {
   return `<li class="bill"><div class="line"><span class="pill">bill</span><span class="what">${entry.note === "" ? "Bill" : esc(entry.note)}</span><span class="total">${formatCents(total)}</span></div><div class="by">${avatar(entry.paidBy, "small")}${name(entry.paidBy)} paid</div><ul class="chips">${chips}</ul>${remove}</li>`;
 }
 
+// The same top on every house page: which house, who you are, and a way out
+// if that isn't you.
+function houseTop(view: HouseView, title = "Serumah"): string {
+  return `      <header class="top">
+        <h1>${esc(title)}</h1>
+        <p class="quiet">House <strong>${esc(view.code)}</strong> · you are <strong>${esc(view.me.name)}</strong> · <a href="/h/${esc(view.code)}/join">Not you?</a></p>
+      </header>`;
+}
+
+const backLink = (code: string): string => `<p class="back"><a href="/h/${esc(code)}">← Back</a></p>`;
+
+const historyBox = (view: HouseView, entries: Entry[]): string =>
+  `<section class="box"><h2>History</h2><ul id="history">${entries.map((e) => entryLine(e, `/h/${view.code}`, view.me)).join("")}</ul></section>`;
+
+// How many history entries the house page shows before "See all history".
+export const RECENT = 5;
+
 export function housePage(view: HouseView): string {
   const base = `/h/${view.code}`;
-  const draft = view.draft ?? { note: "", total: "", amounts: {}, ticked: view.people.map((p) => p.id) };
-
   const owed = view.balances.filter((b) => b.cents > 0);
   const owing = view.balances.filter((b) => b.cents < 0);
   const sum = (list: { cents: number }[]): number => list.reduce((total, b) => total + Math.abs(b.cents), 0);
   const list = (id: string, items: string[], empty: string): string =>
     items.length === 0 ? `<p class="quiet">${empty}</p>` : `<ul id="${id}">${items.join("")}</ul>`;
-  const balances =
+  const summary =
     view.balances.length === 0
       ? `<p id="balances">Nobody owes anybody.</p>`
-      : `<div id="totals"><div class="owed"><span class="label">Owed to you</span> <span class="total">${formatCents(sum(owed))}</span></div><div class="owe"><span class="label">You owe</span> <span class="total">${formatCents(sum(owing))}</span></div></div>
-        <div id="balances" class="pair">
+      : `<div id="totals"><div class="owed"><span class="label">Owed to you</span> <span class="total">${formatCents(sum(owed))}</span></div><div class="owe"><span class="label">You owe</span> <span class="total">${formatCents(sum(owing))}</span></div></div>`;
+  const cards =
+    view.balances.length === 0
+      ? ""
+      : `<div id="balances" class="pair">
           <section class="box"><h2>Owed to you</h2>${list("owed", owed.map(balanceLine), "Nobody owes you.")}</section>
           <section class="box"><h2>You owe</h2>${list("owing", owing.map(balanceLine), "You don't owe anybody.")}</section>
         </div>`;
-  const history =
-    view.history.length === 0
-      ? `<p id="history">No bills yet.</p>`
-      : `<section class="box"><h2>History</h2><ul id="history">${view.history.map((e) => entryLine(e, base, view.me)).join("")}</ul></section>`;
+  const more =
+    view.history.length > RECENT ? `<p class="more"><a href="${esc(base)}/history">See all history (${view.history.length})</a></p>` : "";
+  const history = view.history.length === 0 ? `<p id="history">No bills yet.</p>` : historyBox(view, view.history.slice(0, RECENT)) + more;
 
+  return layout(
+    "Serumah",
+    `${houseTop(view)}
+      ${view.notice ? `<p role="status">${esc(view.notice)}</p>` : ""}
+      <section id="live" data-base="${esc(base)}" data-page="${esc(base)}">
+        ${summary}
+        <nav class="do"><a class="button" href="${esc(base)}/bill">+ Add a bill</a><a class="button secondary" href="${esc(base)}/pay">Record a payment</a></nav>
+        ${cards}
+        ${history}
+      </section>`,
+    LIVE_SCRIPT,
+  );
+}
+
+export function historyPage(view: HouseView): string {
+  const base = `/h/${view.code}`;
+  return layout(
+    "History",
+    `${houseTop(view)}
+      ${backLink(view.code)}
+      <section id="live" data-base="${esc(base)}" data-page="${esc(base)}/history">
+        ${view.history.length === 0 ? `<p id="history">No bills yet.</p>` : historyBox(view, view.history)}
+      </section>`,
+    LIVE_SCRIPT,
+  );
+}
+
+export function billPage(view: HouseView, draft?: Draft): string {
+  const base = `/h/${view.code}`;
+  const d = draft ?? { note: "", total: "", amounts: {}, ticked: view.people.map((p) => p.id) };
   const rows = view.people
     .map(
       (p) =>
-        `<p class="row"><label><input type="checkbox" name="with_${p.id}"${draft.ticked.includes(p.id) ? " checked" : ""} /> ${esc(p.name)}</label> <input name="amount_${p.id}" inputmode="decimal" size="8" autocomplete="off" value="${esc(draft.amounts[p.id] ?? "")}" aria-label="${esc(p.name)}'s amount" /></p>`,
+        `<p class="row"><label><input type="checkbox" name="with_${p.id}"${d.ticked.includes(p.id) ? " checked" : ""} /> ${esc(p.name)}</label> <input name="amount_${p.id}" inputmode="decimal" size="8" autocomplete="off" value="${esc(d.amounts[p.id] ?? "")}" aria-label="${esc(p.name)}'s amount" /></p>`,
     )
     .join("\n          ");
-  const others = view.people.filter((p) => p.id !== view.me.id);
-  const payForm =
-    others.length === 0
-      ? `<p class="quiet">Nobody else is in the house yet. Share the code <strong>${esc(view.code)}</strong>.</p>`
-      : `<form class="card" method="post" action="${esc(base)}/pay">
-        <label>To <select name="to">${others.map((p) => `<option value="${p.id}">${esc(p.name)}</option>`).join("")}</select></label>
-        <label>Amount <input name="amount" inputmode="decimal" size="8" required autocomplete="off" /></label>
-        <button type="submit">I paid this</button>
-      </form>`;
-
   // "Add bill" comes first so pressing Enter in a box adds the bill rather
   // than refilling the form.
   return layout(
-    "Serumah",
-    `      <header class="top">
-        <h1>Serumah</h1>
-        <p class="quiet">House <strong>${esc(view.code)}</strong> · you are <strong>${esc(view.me.name)}</strong> · <a href="${esc(base)}/join">Not you?</a></p>
-      </header>
-      ${view.notice ? `<p role="status">${esc(view.notice)}</p>` : ""}
-      <section id="live" data-base="${esc(base)}" data-people="${view.people.map((p) => p.id).join(",")}">
-        ${balances}
-        ${history}
-      </section>
-      <section id="forms">
-      <p id="stale" role="status" hidden>Someone new joined the house. Once you've sent this, reload to include them.</p>
-      <h2>Add a bill you paid</h2>
+    "Add a bill",
+    `${houseTop(view)}
+      ${backLink(view.code)}
+      <h2 class="page">Add a bill you paid</h2>
       <form class="card" method="post" action="${esc(base)}/bill">
-        ${alertLine(draft.message)}
-        <label>What for <input name="note" maxlength="${NOTE_MAX}" autocomplete="off" value="${esc(draft.note)}" /></label>
+        ${alertLine(d.message)}
+        <label>What for <input name="note" maxlength="${NOTE_MAX}" autocomplete="off" value="${esc(d.note)}" /></label>
         <fieldset>
           <legend>Who owes what (in dollars)</legend>
           ${rows}
         </fieldset>
         <button type="submit" name="intent" value="add">Add bill</button>
-        <p class="split"><label>Or split a total equally between the ticked people <input name="total" inputmode="decimal" size="8" autocomplete="off" value="${esc(draft.total)}" /></label>
+        <p class="split"><label>Or split a total equally between the ticked people <input name="total" inputmode="decimal" size="8" autocomplete="off" value="${esc(d.total)}" /></label>
         <button type="submit" name="intent" value="fill" class="secondary">Split equally</button></p>
-      </form>
-      <h2>Record a payment you made</h2>
-      ${payForm}
-      </section>`,
-    LIVE_SCRIPT,
+      </form>`,
+  );
+}
+
+export type PayDraft = { to: string; amount: string; message?: string };
+
+export function payPage(view: HouseView, draft?: PayDraft): string {
+  const base = `/h/${view.code}`;
+  const others = view.people.filter((p) => p.id !== view.me.id);
+  const form =
+    others.length === 0
+      ? `<p class="quiet">Nobody else is in the house yet. Share the code <strong>${esc(view.code)}</strong>.</p>`
+      : `<form class="card" method="post" action="${esc(base)}/pay">
+        ${alertLine(draft?.message)}
+        <label>To <select name="to">${others.map((p) => `<option value="${p.id}"${draft?.to === String(p.id) ? " selected" : ""}>${esc(p.name)}</option>`).join("")}</select></label>
+        <label>Amount <input name="amount" inputmode="decimal" size="8" required autocomplete="off" value="${esc(draft?.amount ?? "")}" /></label>
+        <button type="submit">I paid this</button>
+      </form>`;
+  return layout(
+    "Record a payment",
+    `${houseTop(view)}
+      ${backLink(view.code)}
+      <h2 class="page">Record a payment you made</h2>
+      ${form}`,
   );
 }
 

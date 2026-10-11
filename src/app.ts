@@ -4,7 +4,7 @@ import type { Hub } from "./live.ts";
 import { balancesFor, equalSplit, parseCents, plainCents } from "./money.ts";
 import type { Share } from "./money.ts";
 import { NAME_MAX, NOTE_MAX, normaliseNote } from "./names.ts";
-import { homePage, housePage, joinPage, messagePage } from "./pages.ts";
+import { billPage, historyPage, homePage, housePage, joinPage, messagePage, payPage } from "./pages.ts";
 import type { Draft, Entry, HouseView } from "./pages.ts";
 import { renderReadmePage } from "./readme.ts";
 import type { Person, Store } from "./store.ts";
@@ -89,7 +89,7 @@ function cookieFor(req: IncomingMessage, code: string, token: string): string {
   return `${cookieName(code)}=${token}; Path=/; HttpOnly; SameSite=Lax; Max-Age=31536000${secure}`;
 }
 
-function viewFor(store: Store, code: string, me: Person, draft?: Draft): HouseView {
+function viewFor(store: Store, code: string, me: Person): HouseView {
   const people = store.people(code);
   const byId = new Map<number, Person>(people.map((p) => [p.id, p] as const));
   const order = new Map<number, number>(people.map((p, i) => [p.id, i] as const));
@@ -127,7 +127,6 @@ function viewFor(store: Store, code: string, me: Person, draft?: Draft): HouseVi
     people,
     balances: people.filter((p) => net.has(p.id)).map((p) => ({ person: p, cents: net.get(p.id) ?? 0 })),
     history: dated.map((d) => d.entry),
-    draft,
   };
 }
 
@@ -208,7 +207,7 @@ async function house(
   if (method === "POST" && action === "join") {
     const outcome = store.join(code, (await readForm(req)).get("name") ?? "");
     if (outcome.ok) {
-      // Open pages need the newcomer in their forms.
+      // Open pages show the newcomer.
       hub.broadcast(code);
       return redirect(res, `/h/${code}`, cookieFor(req, code, outcome.token));
     }
@@ -238,6 +237,9 @@ async function house(
   if (method === "GET" && action === "") {
     return sendHtml(res, 200, housePage(viewFor(store, code, me)));
   }
+  if (method === "GET" && action === "history") return sendHtml(res, 200, historyPage(viewFor(store, code, me)));
+  if (method === "GET" && action === "bill") return sendHtml(res, 200, billPage(viewFor(store, code, me)));
+  if (method === "GET" && action === "pay") return sendHtml(res, 200, payPage(viewFor(store, code, me)));
   if (method === "POST" && action === "bill") {
     const form = await readForm(req);
     const people = store.people(code);
@@ -248,7 +250,7 @@ async function house(
       ticked: people.filter((p) => form.has(`with_${p.id}`)).map((p) => p.id),
     };
     const again = (message: string): void =>
-      sendHtml(res, 400, housePage(viewFor(store, code, me, { ...draft, message })));
+      sendHtml(res, 400, billPage(viewFor(store, code, me), { ...draft, message }));
     const note = normaliseNote(draft.note);
     if (note === null) return again(`Keep the note to ${NOTE_MAX} characters, without control characters.`);
 
@@ -261,7 +263,7 @@ async function house(
         const cents = split.get(p.id);
         draft.amounts[p.id] = cents === undefined ? "" : plainCents(cents);
       }
-      return sendHtml(res, 200, housePage(viewFor(store, code, me, draft)));
+      return sendHtml(res, 200, billPage(viewFor(store, code, me), draft));
     }
 
     // People who joined after the form was drawn have no box, so only the
@@ -292,12 +294,13 @@ async function house(
   }
   if (method === "POST" && action === "pay") {
     const form = await readForm(req);
-    const cents = parseCents(form.get("amount") ?? "");
-    if (cents === null || cents === 0) throw new HttpError(400, "Type the amount in dollars, like 15.50.");
-    const to = idFrom(form.get("to"));
-    if (to === null || store.recordPayment(code, me.id, to, cents) === null) {
-      throw new HttpError(400, "Pick someone else in this house.");
-    }
+    const typed = { to: form.get("to") ?? "", amount: form.get("amount") ?? "" };
+    // A mistake keeps what was typed, on the payment page.
+    const again = (message: string): void => sendHtml(res, 400, payPage(viewFor(store, code, me), { ...typed, message }));
+    const cents = parseCents(typed.amount);
+    if (cents === null || cents === 0) return again("Type the amount in dollars, like 15.50.");
+    const to = idFrom(typed.to);
+    if (to === null || store.recordPayment(code, me.id, to, cents) === null) return again("Pick someone else in this house.");
     hub.broadcast(code);
     return redirect(res, `/h/${code}`);
   }

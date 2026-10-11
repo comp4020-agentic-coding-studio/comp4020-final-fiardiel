@@ -1,6 +1,6 @@
 import { JSDOM } from "jsdom";
 import { describe, expect, it } from "vitest";
-import { esc, homePage, housePage, joinPage, layout } from "../../src/pages.ts";
+import { billPage, esc, historyPage, homePage, housePage, joinPage, layout, payPage } from "../../src/pages.ts";
 import type { HouseView } from "../../src/pages.ts";
 
 const dani = { id: 1, name: "Dani" };
@@ -172,25 +172,40 @@ describe("house page", () => {
 
   it("shows names and notes as text, never as markup", () => {
     const evil = { id: 4, name: "<b>x</b>" };
-    const html = housePage(
-      house({
-        people: [evil, rafi],
-        balances: [{ person: evil, cents: 100 }],
-        history: [{ kind: "bill", id: 1, paidBy: evil, note: "<i>n</i>", shares: [{ person: rafi, cents: 100 }], mine: false }],
-        draft: { note: "<i>n</i>", total: "", amounts: {}, ticked: [], message: "<b>x</b>'s amount" },
-      }),
-    );
-    expect(html).not.toContain("<b>x</b>");
-    expect(html).not.toContain("<i>n</i>");
-    expect(text(html)).toContain("<b>x</b> owes you $1.00");
+    const view = house({
+      people: [evil, rafi],
+      balances: [{ person: evil, cents: 100 }],
+      history: [{ kind: "bill", id: 1, paidBy: evil, note: "<i>n</i>", shares: [{ person: rafi, cents: 100 }], mine: false }],
+    });
+    for (const html of [
+      housePage(view),
+      historyPage(view),
+      billPage(view, { note: "<i>n</i>", total: "", amounts: {}, ticked: [], message: "<b>x</b>'s amount" }),
+      payPage(view, { to: "4", amount: "<i>n</i>", message: "<b>x</b>" }),
+    ]) {
+      expect(html).not.toContain("<b>x</b>");
+      expect(html).not.toContain("<i>n</i>");
+    }
+    expect(text(housePage(view))).toContain("<b>x</b> owes you $1.00");
   });
 
-  it("keeps the forms outside the live section, so an update never wipes them", () => {
-    const html = housePage(house());
-    expect(live(html)!.getAttribute("data-base")).toBe("/h/ABC234");
-    expect(doc(html).querySelector('form[action="/h/ABC234/bill"]')).not.toBeNull();
-    expect(doc(html).querySelector('form[action="/h/ABC234/pay"]')).not.toBeNull();
-    expect(live(html)!.querySelector('form[action="/h/ABC234/bill"], form[action="/h/ABC234/pay"]')).toBeNull();
+  it("keeps the forms off the house page, behind two buttons", () => {
+    const d = doc(housePage(house()));
+    expect(d.querySelector('form[action="/h/ABC234/bill"], form[action="/h/ABC234/pay"]')).toBeNull();
+    expect(d.querySelector('a[href="/h/ABC234/bill"]')?.textContent).toBe("+ Add a bill");
+    expect(d.querySelector('a[href="/h/ABC234/pay"]')?.textContent).toBe("Record a payment");
+  });
+
+  const receipts = (n: number) =>
+    Array.from({ length: n }, (_, i) => ({ kind: "payment" as const, id: i + 1, from: dani, to: rafi, cents: 100 * (i + 1), toMe: true }));
+
+  it("shows the 5 most recent history entries, with the rest a link away", () => {
+    const d = doc(housePage(house({ history: receipts(7) })));
+    expect(d.querySelectorAll("#history > li")).toHaveLength(5);
+    expect(d.querySelector('a[href="/h/ABC234/history"]')?.textContent).toBe("See all history (7)");
+    const few = doc(housePage(house({ history: receipts(5) })));
+    expect(few.querySelectorAll("#history > li")).toHaveLength(5);
+    expect(few.querySelector('a[href="/h/ABC234/history"]')).toBeNull();
   });
 
   it("listens for changes and re-fetches on every reconnect", () => {
@@ -198,34 +213,6 @@ describe("house page", () => {
     expect(script).toContain("EventSource");
     expect(script).toContain('"changed"');
     expect(script).toContain('"open"');
-  });
-
-  it("offers an amount box and a tick for everyone, ticked by default", () => {
-    const d = doc(housePage(house()));
-    for (const p of [ari, dani, rafi]) {
-      expect(d.querySelector(`input[name="amount_${p.id}"]`), p.name).not.toBeNull();
-      expect(d.querySelector<HTMLInputElement>(`input[name="with_${p.id}"]`)!.checked, p.name).toBe(true);
-    }
-  });
-
-  it("refills the bill form from a draft, with its message", () => {
-    const d = doc(
-      housePage(
-        house({
-          draft: { note: "Woolies", total: "10", amounts: { 3: "3.33", 1: "", 2: "3.34" }, ticked: [3, 2], message: "Check the amounts" },
-        }),
-      ),
-    );
-    expect(d.querySelector<HTMLInputElement>('input[name="note"]')!.value).toBe("Woolies");
-    expect(d.querySelector<HTMLInputElement>('input[name="amount_3"]')!.value).toBe("3.33");
-    expect(d.querySelector<HTMLInputElement>('input[name="with_1"]')!.checked).toBe(false);
-    expect(d.querySelector('[role="alert"]')!.textContent).toBe("Check the amounts");
-  });
-
-  it("offers to pay only other people, and says so when you're alone", () => {
-    const d = doc(housePage(house()));
-    expect([...d.querySelectorAll('select[name="to"] option')].map((o) => o.textContent)).toEqual(["Ari", "Dani"]);
-    expect(text(housePage(house({ people: [rafi] })))).toContain("Nobody else is in the house yet");
   });
 
   it("never nags", () => {
@@ -236,6 +223,63 @@ describe("house page", () => {
       }),
     );
     expect(text(html)).not.toMatch(/\b(overdue|late|remind|reminder|urgent)\b/i);
+  });
+});
+
+describe("history page", () => {
+  it("lists every entry, live, with a way back", () => {
+    const html = historyPage(house({ history: Array.from({ length: 7 }, (_, i) => ({ kind: "payment" as const, id: i + 1, from: dani, to: rafi, cents: 100, toMe: true })) }));
+    const d = doc(html);
+    expect(d.querySelectorAll("#history > li")).toHaveLength(7);
+    expect(d.querySelector('a[href="/h/ABC234"]')?.textContent).toBe("← Back");
+    expect(d.querySelector("#live")!.getAttribute("data-page")).toBe("/h/ABC234/history");
+    expect(d.querySelector("script")?.textContent).toContain("EventSource");
+  });
+
+  it("says so when there is nothing yet", () => {
+    expect(text(historyPage(house()))).toContain("No bills yet.");
+  });
+});
+
+describe("bill page", () => {
+  it("offers an amount box and a tick for everyone, ticked by default, with a way back", () => {
+    const d = doc(billPage(house()));
+    expect(d.querySelector('form[action="/h/ABC234/bill"]')).not.toBeNull();
+    expect(d.querySelector('a[href="/h/ABC234"]')?.textContent).toBe("← Back");
+    for (const p of [ari, dani, rafi]) {
+      expect(d.querySelector(`input[name="amount_${p.id}"]`), p.name).not.toBeNull();
+      expect(d.querySelector<HTMLInputElement>(`input[name="with_${p.id}"]`)!.checked, p.name).toBe(true);
+    }
+  });
+
+  it("refills the form from a draft, with its message", () => {
+    const d = doc(
+      billPage(house(), { note: "Woolies", total: "10", amounts: { 3: "3.33", 1: "", 2: "3.34" }, ticked: [3, 2], message: "Check the amounts" }),
+    );
+    expect(d.querySelector<HTMLInputElement>('input[name="note"]')!.value).toBe("Woolies");
+    expect(d.querySelector<HTMLInputElement>('input[name="amount_3"]')!.value).toBe("3.33");
+    expect(d.querySelector<HTMLInputElement>('input[name="with_1"]')!.checked).toBe(false);
+    expect(d.querySelector('[role="alert"]')!.textContent).toBe("Check the amounts");
+  });
+});
+
+describe("payment page", () => {
+  it("offers to pay only other people, with a way back", () => {
+    const d = doc(payPage(house()));
+    expect(d.querySelector('form[action="/h/ABC234/pay"]')).not.toBeNull();
+    expect([...d.querySelectorAll('select[name="to"] option')].map((o) => o.textContent)).toEqual(["Ari", "Dani"]);
+    expect(d.querySelector('a[href="/h/ABC234"]')?.textContent).toBe("← Back");
+  });
+
+  it("keeps what was typed, with the message, after a mistake", () => {
+    const d = doc(payPage(house(), { to: "1", amount: "lots", message: "Type the amount in dollars, like 15.50." }));
+    expect(d.querySelector<HTMLInputElement>('input[name="amount"]')!.value).toBe("lots");
+    expect(d.querySelector<HTMLOptionElement>('option[value="1"]')!.selected).toBe(true);
+    expect(d.querySelector('[role="alert"]')!.textContent).toBe("Type the amount in dollars, like 15.50.");
+  });
+
+  it("says so when you're alone in the house", () => {
+    expect(text(payPage(house({ people: [rafi] })))).toContain("Nobody else is in the house yet");
   });
 });
 
@@ -371,31 +415,29 @@ describe("live script", () => {
     expect(sources).toHaveLength(1);
   });
 
-  const zoe = { id: 5, name: "Zoe" };
-  const withZoe = housePage(house({ people: [ari, dani, rafi, zoe] }));
-
-  it("adds someone who just joined to untouched forms", async () => {
-    const { document, changed } = run(withZoe);
-    await changed();
-    expect(document.querySelector('input[name="amount_5"]')).not.toBeNull();
-    expect([...document.querySelectorAll('select[name="to"] option')].map((o) => o.textContent)).toContain("Zoe");
-    expect(document.querySelector<HTMLElement>("#stale")!.hidden).toBe(true);
-  });
-
-  it("keeps what you typed when someone joins, and says to reload", async () => {
-    const { document, changed } = run(withZoe);
-    document.querySelector<HTMLInputElement>('input[name="amount_1"]')!.value = "4.50";
-    await changed();
-    expect(document.querySelector<HTMLInputElement>('input[name="amount_1"]')!.value).toBe("4.50");
-    expect(document.querySelector('input[name="amount_5"]')).toBeNull();
-    expect(document.querySelector<HTMLElement>("#stale")!.hidden).toBe(false);
-  });
-
-  it("leaves the forms alone when nobody joined", async () => {
-    const { document, changed } = run();
-    const form = document.querySelector('form[action="/h/ABC234/bill"]');
-    await changed();
-    expect(document.querySelector('form[action="/h/ABC234/bill"]')).toBe(form);
-    expect(document.querySelector<HTMLElement>("#stale")!.hidden).toBe(true);
+  it("re-fetches the page it is on, not always the house page", async () => {
+    const asked: string[] = [];
+    new JSDOM(historyPage(house()), {
+      runScripts: "dangerously",
+      beforeParse(window) {
+        Object.assign(window, {
+          EventSource: class {
+            static CLOSED = 2;
+            readyState = 0;
+            listeners: Record<string, (() => void)[]> = {};
+            addEventListener(type: string, fn: () => void) {
+              (this.listeners[type] ??= []).push(fn);
+              if (type === "open") fn();
+            }
+          },
+          fetch: async (url: string) => {
+            asked.push(url);
+            return { ok: false };
+          },
+        });
+      },
+    });
+    await new Promise((r) => setTimeout(r, 20));
+    expect(asked).toEqual(["/h/ABC234/history"]);
   });
 });

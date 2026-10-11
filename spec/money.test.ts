@@ -165,6 +165,61 @@ describe("history", () => {
   });
 });
 
+describe("pages of their own", () => {
+  it("opens adding a bill, recording a payment and the full history from the house page", async () => {
+    const { code, cookies } = await setUpHouse("Rafi", "Dina");
+    const html = await housePage(code, cookies.Rafi);
+    expect(html).toContain(`href="/h/${code}/bill"`);
+    expect(html).toContain(`href="/h/${code}/pay"`);
+    expect(html).not.toContain(`action="/h/${code}/bill"`);
+    for (const page of ["bill", "pay", "history"]) {
+      const res = await send(`/h/${code}/${page}`, { cookie: cookies.Rafi });
+      expect(res.status, page).toBe(200);
+      expect(await res.text(), page).toContain(`href="/h/${code}">← Back`);
+    }
+    expect(await (await send(`/h/${code}/bill`, { cookie: cookies.Rafi })).text()).toContain(`action="/h/${code}/bill"`);
+    expect(await (await send(`/h/${code}/pay`, { cookie: cookies.Rafi })).text()).toContain(`action="/h/${code}/pay"`);
+  });
+
+  it("sends a stranger to join instead of showing the forms or history", async () => {
+    const { code } = await setUpHouse("Rafi");
+    for (const page of ["bill", "pay", "history"]) {
+      const res = await send(`/h/${code}/${page}`);
+      expect(res.status, page).toBe(303);
+      expect(res.headers.get("location"), page).toBe(`/h/${code}/join`);
+    }
+  });
+
+  it("keeps a mistyped bill on the bill page", async () => {
+    const { code, cookies, ids } = await setUpHouse("Rafi", "Dina");
+    const res = await addBill(code, cookies.Rafi, "Woolies", { [ids.Dina]: "abc" });
+    const html = await res.text();
+    expect(html).toContain(`action="/h/${code}/bill"`);
+    expect(html).not.toContain(`action="/h/${code}/pay"`);
+  });
+
+  it("keeps a mistyped payment on the payment page, with what was typed", async () => {
+    const { code, cookies, ids } = await setUpHouse("Rafi", "Dina");
+    const res = await post(`/h/${code}/pay`, cookies.Dina, { to: ids.Rafi, amount: "lots" });
+    expect(res.status).toBe(400);
+    const html = await res.text();
+    expect(html).toContain(`action="/h/${code}/pay"`);
+    expect(html).toContain('value="lots"');
+    expect(html).toMatch(new RegExp(`value="${ids.Rafi}" selected`));
+    expect(textOf(html)).toContain("Type the amount in dollars");
+  });
+
+  it("shows the 5 most recent entries on the house page and every one on the history page", async () => {
+    const { code, cookies, ids } = await setUpHouse("Rafi", "Dina");
+    for (let i = 1; i <= 7; i++) await addBill(code, cookies.Rafi, `Bill ${i}`, { [ids.Dina]: "1" });
+    const house = await housePage(code, cookies.Dina);
+    expect(historyOf(house).map((e) => e.what)).toEqual(["Bill 7", "Bill 6", "Bill 5", "Bill 4", "Bill 3"]);
+    expect(textOf(house)).toContain("See all history (7)");
+    const all = await (await send(`/h/${code}/history`, { cookie: cookies.Dina })).text();
+    expect(historyOf(all)).toHaveLength(7);
+  });
+});
+
 describe("tone", () => {
   it("never nags, even when someone owes and a payment waits", async () => {
     const { code, cookies, ids } = await setUpHouse("Rafi", "Dina");

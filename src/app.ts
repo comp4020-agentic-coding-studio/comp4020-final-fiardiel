@@ -210,7 +210,11 @@ async function house(
   }
   if (method === "POST" && action === "join") {
     const outcome = store.join(code, (await readForm(req)).get("name") ?? "");
-    if (outcome.ok) return redirect(res, `/h/${code}`, cookieFor(req, code, outcome.token));
+    if (outcome.ok) {
+      // Open pages need the newcomer in their forms.
+      hub.broadcast(code);
+      return redirect(res, `/h/${code}`, cookieFor(req, code, outcome.token));
+    }
     if (outcome.reason === "invalid_name") {
       const message = `Pick a name of 1 to ${NAME_MAX} characters, without control characters.`;
       return sendHtml(res, 400, joinPage(code, store.people(code), message, current));

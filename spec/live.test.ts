@@ -55,6 +55,18 @@ describe("live updates", () => {
     }
   });
 
+  it("tells the house when someone new joins", async () => {
+    const { code, cookies } = await setUpHouse("Rafi");
+    const rafi = await openEvents(code, cookies.Rafi);
+    try {
+      expect(await rafi.waitFor(": connected", 1000)).toBe(true);
+      await joinAs(code, "Zoe");
+      expect(await rafi.waitFor(CHANGED, 1000)).toBe(true);
+    } finally {
+      rafi.close();
+    }
+  });
+
   it("tells no other house", async () => {
     const a = await setUpHouse("Rafi");
     const b = await setUpHouse("Zed");

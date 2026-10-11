@@ -139,11 +139,26 @@ const LIVE_SCRIPT = `
   async function refresh() {
     const res = await fetch(base, { cache: "no-store" });
     if (!res.ok) return;
-    const next = new DOMParser().parseFromString(await res.text(), "text/html").getElementById("live");
-    if (next) {
-      live.replaceWith(next);
-      live = next;
+    const page = new DOMParser().parseFromString(await res.text(), "text/html");
+    const next = page.getElementById("live");
+    if (!next) return;
+    const joined = next.dataset.people !== live.dataset.people;
+    live.replaceWith(next);
+    live = next;
+    // Someone joined: the forms need them too. Forms nobody has typed in are
+    // swapped for fresh ones; otherwise what was typed stays and a note asks
+    // for a reload once it's sent.
+    if (joined) {
+      const forms = document.getElementById("forms");
+      if (untouched(forms)) forms.replaceWith(page.getElementById("forms"));
+      else document.getElementById("stale").hidden = false;
     }
+  }
+  function untouched(forms) {
+    for (const input of forms.querySelectorAll("input")) {
+      if (input.type === "checkbox" ? !input.checked : input.type !== "hidden" && input.value !== "") return false;
+    }
+    return true;
   }
   // The browser retries a dropped stream by itself, but gives up for good when
   // a retry gets an error page (a deploy, a restart). Then a new stream is
@@ -237,12 +252,14 @@ export function housePage(view: HouseView): string {
     `      <h1>Serumah</h1>
       <p class="quiet">House <strong>${esc(view.code)}</strong> · you are <strong>${esc(view.me.name)}</strong> · <a href="${esc(base)}/join">Not you?</a></p>
       ${view.notice ? `<p role="status">${esc(view.notice)}</p>` : ""}
-      <section id="live" data-base="${esc(base)}">
+      <section id="live" data-base="${esc(base)}" data-people="${view.people.map((p) => p.id).join(",")}">
         <h2>Balances</h2>
         ${balances}${toAnswer}${waiting}
         <h2>History</h2>
         ${history}
       </section>
+      <section id="forms">
+      <p id="stale" role="status" hidden>Someone new joined the house. Once you've sent this, reload to include them.</p>
       <h2>Add a bill you paid</h2>
       <form method="post" action="${esc(base)}/bill">
         ${alertLine(draft.message)}
@@ -256,7 +273,8 @@ export function housePage(view: HouseView): string {
         <button type="submit" name="intent" value="fill">Split equally</button></p>
       </form>
       <h2>Record a payment you made</h2>
-      ${payForm}`,
+      ${payForm}
+      </section>`,
     LIVE_SCRIPT,
   );
 }

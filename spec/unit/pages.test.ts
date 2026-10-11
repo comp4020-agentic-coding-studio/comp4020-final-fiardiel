@@ -243,8 +243,9 @@ describe("home page", () => {
 
 describe("live script", () => {
   // Runs the page's own script in jsdom with a stand-in EventSource and timers
-  // that fire at once, so reconnecting can be watched without a server.
-  function run() {
+  // that fire at once, so reconnecting can be watched without a server. `next`
+  // is what the page gets when it fetches itself again.
+  function run(next: string = housePage(house())) {
     const sources: { url: string; readyState: number; listeners: Record<string, (() => void)[]> }[] = [];
     class FakeEventSource {
       static CLOSED = 2;
@@ -262,12 +263,12 @@ describe("live script", () => {
         this.readyState = 2;
       }
     }
-    new JSDOM(housePage(house()), {
+    const dom = new JSDOM(housePage(house()), {
       runScripts: "dangerously",
       beforeParse(window) {
         Object.assign(window, {
           EventSource: FakeEventSource,
-          fetch: () => new Promise(() => {}),
+          fetch: async () => ({ ok: true, text: async () => next }),
           setTimeout: (fn: () => void) => {
             fn();
             return 0;
@@ -275,15 +276,19 @@ describe("live script", () => {
         });
       },
     });
-    return sources;
+    const changed = async () => {
+      for (const fn of sources[0].listeners.changed ?? []) fn();
+      await new Promise((r) => setTimeout(r, 20));
+    };
+    return { sources, document: dom.window.document, changed };
   }
 
   it("opens a stream for its own house", () => {
-    expect(run().map((s) => s.url)).toEqual(["/h/ABC234/events"]);
+    expect(run().sources.map((s) => s.url)).toEqual(["/h/ABC234/events"]);
   });
 
   it("starts a new stream when the browser gives up on one", () => {
-    const sources = run();
+    const { sources } = run();
     sources[0].readyState = 2;
     for (const fn of sources[0].listeners.error ?? []) fn();
     expect(sources).toHaveLength(2);
@@ -291,9 +296,37 @@ describe("live script", () => {
   });
 
   it("leaves a stream the browser is still retrying alone", () => {
-    const sources = run();
+    const { sources } = run();
     sources[0].readyState = 0;
     for (const fn of sources[0].listeners.error ?? []) fn();
     expect(sources).toHaveLength(1);
+  });
+
+  const zoe = { id: 5, name: "Zoe" };
+  const withZoe = housePage(house({ people: [ari, dani, rafi, zoe] }));
+
+  it("adds someone who just joined to untouched forms", async () => {
+    const { document, changed } = run(withZoe);
+    await changed();
+    expect(document.querySelector('input[name="amount_5"]')).not.toBeNull();
+    expect([...document.querySelectorAll('select[name="to"] option')].map((o) => o.textContent)).toContain("Zoe");
+    expect(document.querySelector<HTMLElement>("#stale")!.hidden).toBe(true);
+  });
+
+  it("keeps what you typed when someone joins, and says to reload", async () => {
+    const { document, changed } = run(withZoe);
+    document.querySelector<HTMLInputElement>('input[name="amount_1"]')!.value = "4.50";
+    await changed();
+    expect(document.querySelector<HTMLInputElement>('input[name="amount_1"]')!.value).toBe("4.50");
+    expect(document.querySelector('input[name="amount_5"]')).toBeNull();
+    expect(document.querySelector<HTMLElement>("#stale")!.hidden).toBe(false);
+  });
+
+  it("leaves the forms alone when nobody joined", async () => {
+    const { document, changed } = run();
+    const form = document.querySelector('form[action="/h/ABC234/bill"]');
+    await changed();
+    expect(document.querySelector('form[action="/h/ABC234/bill"]')).toBe(form);
+    expect(document.querySelector<HTMLElement>("#stale")!.hidden).toBe(true);
   });
 });

@@ -4,8 +4,10 @@ These come from the argument in `README.md`. If a change would break one, stop a
 
 ## What the app must never do
 
-- **Blame when the kitchen is clean.** Name the last cook as responsible only while the kitchen is messy, and only the last cook who started before the mess began. "Last cooked" is always shown as a plain fact, never emphasised.
-- **Nag.** No notifications, reminders, points, leaderboards or shaming. The app shows the state when someone looks.
+- **Count a payment the receiver hasn't confirmed.** "I paid Dina back" changes no balance until Dina says she got it. A payment she says she didn't get is gone.
+- **Let anyone act for the person concerned.** Only the payer deletes their bill; only the receiver answers a payment.
+- **Get the money wrong.** Amounts are whole cents everywhere. An equal split adds up to its total exactly. Balances are worked out from the bills and received payments every time, never stored.
+- **Nag or shame.** No notifications, reminders, "overdue", rankings of who owes most, or emphasis on debts. Balances are plain facts in name order. The app shows the state when someone looks.
 - **Require accounts or passwords.** A person is a name inside a house. The house code is the one shared secret.
 - **Show a name or any typed text as markup.** Everything another person typed is escaped in the page. Names are trimmed, length-limited, normalised, and refused when invisible.
 - **Let one house touch another.** Every read and write is scoped to the house code. A cookie works only in its own house.

@@ -33,21 +33,62 @@ export function esc(text: string): string {
   return text.replace(/[&<>"']/g, (c) => ESCAPES[c]);
 }
 
+// Notebook look: paper off-white, a serif title, thin ruled lines and one
+// sage accent. Balances are large so they read at arm's length, but owing and
+// being owed are styled the same: no red, nothing that marks a debtor.
 const STYLE = `
-  :root { color-scheme: light dark; }
-  body { margin: 0; font: 1rem/1.5 system-ui, sans-serif; }
-  main { max-width: 32rem; margin: 0 auto; padding: 1rem; }
-  h1 { font-size: 1.5rem; }
-  h2 { font-size: 1.15rem; }
+  :root {
+    color-scheme: light dark;
+    --paper: #faf7f2; --card: #fffdf9; --ink: #2f2a24; --muted: #7d7468;
+    --rule: #e3dccf; --accent: #5f7a5a; --on-accent: #ffffff;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --paper: #1d1b18; --card: #25221e; --ink: #ece6dc; --muted: #a59c8f;
+      --rule: #3a352e; --accent: #93b28c; --on-accent: #14130f;
+    }
+  }
+  * { box-sizing: border-box; }
+  [hidden] { display: none !important; }
+  body { margin: 0; background: var(--paper); color: var(--ink); font: 1rem/1.5 system-ui, -apple-system, "Segoe UI", sans-serif; }
+  main { max-width: 32rem; margin: 0 auto; padding: 1.25rem 1rem 2.5rem; }
+  h1 { font: 400 2rem/1.2 Georgia, "Times New Roman", serif; margin: 0.5rem 0 1rem; }
+  h2 { font-size: 0.75rem; font-weight: 600; letter-spacing: 0.08em; text-transform: uppercase; color: var(--muted); margin: 1.75rem 0 0.5rem; }
+  a { color: var(--accent); }
+  .quiet { color: var(--muted); font-size: 0.875rem; }
+  ul { list-style: none; padding: 0; margin: 0; }
+  :focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+
+  #balances li { display: flex; justify-content: space-between; align-items: baseline; gap: 1rem; padding: 0.75rem 0; border-bottom: 1px solid var(--rule); font-size: 1.1rem; }
+  #balances li:first-child { border-top: 1px solid var(--rule); }
+  #balances .amount { font-size: 1.85rem; font-weight: 600; font-variant-numeric: tabular-nums; white-space: nowrap; }
+  p#balances { margin: 0; padding: 0.75rem 0; border-top: 1px solid var(--rule); border-bottom: 1px solid var(--rule); font-size: 1.2rem; }
+  #history li { padding: 0.5rem 0; border-bottom: 1px solid var(--rule); color: var(--muted); font-size: 0.9rem; }
+  p#history { color: var(--muted); font-size: 0.9rem; }
+
   form { margin: 0.5rem 0; }
-  button, input { font: inherit; min-height: 2.75rem; }
-  button { padding: 0 1rem; }
-  input { padding: 0 0.5rem; }
-  .quiet { opacity: 0.7; }
-  li form { display: inline; margin: 0 0 0 0.5rem; }
-  fieldset { border: 0; padding: 0; margin: 0.5rem 0; }
-  fieldset p { margin: 0.25rem 0; }
-  #live li { margin: 0.25rem 0; }
+  form.card { background: var(--card); border: 1px solid var(--rule); border-radius: 14px; padding: 1rem; }
+  label { display: block; margin: 0.25rem 0; }
+  input, select, button { font: inherit; min-height: 2.75rem; border-radius: 10px; }
+  input, select { width: 100%; padding: 0 0.75rem; border: 1px solid var(--rule); background: var(--paper); color: var(--ink); }
+  input[type="checkbox"] { width: 1.25rem; min-height: 1.25rem; margin: 0; accent-color: var(--accent); }
+  button { border: 0; padding: 0 1.25rem; background: var(--accent); color: var(--on-accent); font-weight: 600; cursor: pointer; }
+  button.secondary { background: transparent; color: var(--accent); border: 1.5px solid var(--accent); }
+  /* "Add bill" comes first in the page so Enter adds the bill, but it shows
+     last, after "Split equally", in the order people use them. */
+  form.card { display: flex; flex-direction: column; }
+  form.card > button { order: 1; width: 100%; margin-top: 0.75rem; }
+  li form { display: inline; margin: 0 0 0 0.25rem; }
+  li form button { min-height: 2.75rem; padding: 0 0.5rem; background: none; color: var(--accent); font-weight: 500; text-decoration: underline; }
+
+  fieldset { border: 0; padding: 0; margin: 0.75rem 0 0; }
+  legend { font-size: 0.875rem; color: var(--muted); margin-bottom: 0.25rem; }
+  .row { display: grid; grid-template-columns: 1fr 7rem; align-items: center; gap: 0.75rem; margin: 0; padding: 0.35rem 0; border-bottom: 1px solid var(--rule); }
+  .row label { display: flex; align-items: center; gap: 0.6rem; margin: 0; }
+  .row input:not([type="checkbox"]), .split input { text-align: right; }
+  .split { display: grid; grid-template-columns: 1fr auto; align-items: end; gap: 0.5rem; margin: 0.75rem 0 0; }
+  .split label { margin: 0; font-size: 0.875rem; color: var(--muted); }
+  [role="alert"], [role="status"] { margin: 0.5rem 0; padding: 0.5rem 0.75rem; background: var(--card); border-left: 3px solid var(--accent); border-radius: 6px; }
 `;
 
 export function layout(title: string, body: string, script = ""): string {
@@ -70,11 +111,12 @@ ${body}
 `;
 }
 
-function postForm(action: string, fields: Record<string, string>, label: string): string {
+function postForm(action: string, fields: Record<string, string>, label: string, cls = ""): string {
   const hidden = Object.entries(fields)
     .map(([name, value]) => `<input type="hidden" name="${esc(name)}" value="${esc(value)}" />`)
     .join("");
-  return `<form method="post" action="${esc(action)}">${hidden}<button type="submit">${esc(label)}</button></form>`;
+  const klass = cls === "" ? "" : ` class="${esc(cls)}"`;
+  return `<form method="post" action="${esc(action)}">${hidden}<button type="submit"${klass}>${esc(label)}</button></form>`;
 }
 
 const alertLine = (message?: string): string => (message ? `<p role="alert">${esc(message)}</p>` : "");
@@ -113,7 +155,7 @@ export function joinPage(code: string, people: Person[], message?: string, curre
       ? ""
       : `
       <h2>Already here? That's me</h2>
-      ${people.map((p) => postForm(`/h/${code}/claim`, { person: String(p.id) }, p.name)).join("\n      ")}`;
+      ${people.map((p) => postForm(`/h/${code}/claim`, { person: String(p.id) }, p.name, "secondary")).join("\n      ")}`;
   return layout(
     "Join",
     `      <h1>Join house ${esc(code)}</h1>
@@ -181,9 +223,8 @@ const LIVE_SCRIPT = `
 
 function balanceLine(b: { person: Person; cents: number }): string {
   const name = `<span class="name">${esc(b.person.name)}</span>`;
-  return b.cents > 0
-    ? `<li>${name} owes you ${formatCents(b.cents)}</li>`
-    : `<li>You owe ${name} ${formatCents(-b.cents)}</li>`;
+  const who = b.cents > 0 ? `${name} owes you` : `You owe ${name}`;
+  return `<li><span class="who">${who}</span> <span class="amount">${formatCents(Math.abs(b.cents))}</span></li>`;
 }
 
 function entryLine(entry: Entry, base: string): string {
@@ -215,14 +256,14 @@ export function housePage(view: HouseView): string {
   const rows = view.people
     .map(
       (p) =>
-        `<p><label><input type="checkbox" name="with_${p.id}"${draft.ticked.includes(p.id) ? " checked" : ""} /> ${esc(p.name)}</label> <input name="amount_${p.id}" inputmode="decimal" size="8" autocomplete="off" value="${esc(draft.amounts[p.id] ?? "")}" aria-label="${esc(p.name)}'s amount" /></p>`,
+        `<p class="row"><label><input type="checkbox" name="with_${p.id}"${draft.ticked.includes(p.id) ? " checked" : ""} /> ${esc(p.name)}</label> <input name="amount_${p.id}" inputmode="decimal" size="8" autocomplete="off" value="${esc(draft.amounts[p.id] ?? "")}" aria-label="${esc(p.name)}'s amount" /></p>`,
     )
     .join("\n          ");
   const others = view.people.filter((p) => p.id !== view.me.id);
   const payForm =
     others.length === 0
       ? `<p class="quiet">Nobody else is in the house yet. Share the code <strong>${esc(view.code)}</strong>.</p>`
-      : `<form method="post" action="${esc(base)}/pay">
+      : `<form class="card" method="post" action="${esc(base)}/pay">
         <label>To <select name="to">${others.map((p) => `<option value="${p.id}">${esc(p.name)}</option>`).join("")}</select></label>
         <label>Amount <input name="amount" inputmode="decimal" size="8" required autocomplete="off" /></label>
         <button type="submit">I paid this</button>
@@ -244,7 +285,7 @@ export function housePage(view: HouseView): string {
       <section id="forms">
       <p id="stale" role="status" hidden>Someone new joined the house. Once you've sent this, reload to include them.</p>
       <h2>Add a bill you paid</h2>
-      <form method="post" action="${esc(base)}/bill">
+      <form class="card" method="post" action="${esc(base)}/bill">
         ${alertLine(draft.message)}
         <label>What for <input name="note" maxlength="${NOTE_MAX}" autocomplete="off" value="${esc(draft.note)}" /></label>
         <fieldset>
@@ -252,8 +293,8 @@ export function housePage(view: HouseView): string {
           ${rows}
         </fieldset>
         <button type="submit" name="intent" value="add">Add bill</button>
-        <p><label>Or split a total equally between the ticked people <input name="total" inputmode="decimal" size="8" autocomplete="off" value="${esc(draft.total)}" /></label>
-        <button type="submit" name="intent" value="fill">Split equally</button></p>
+        <p class="split"><label>Or split a total equally between the ticked people <input name="total" inputmode="decimal" size="8" autocomplete="off" value="${esc(draft.total)}" /></label>
+        <button type="submit" name="intent" value="fill" class="secondary">Split equally</button></p>
       </form>
       <h2>Record a payment you made</h2>
       ${payForm}

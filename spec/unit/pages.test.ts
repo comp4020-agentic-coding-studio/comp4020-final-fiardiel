@@ -58,6 +58,21 @@ describe("house page", () => {
     expect(items(html, "#balances li")).toEqual(["Ari owes you $1.00", "You owe Dani $9.00"]);
   });
 
+  it("sets each balance's amount apart, so it can be read at arm's length", () => {
+    const html = housePage(
+      house({
+        balances: [
+          { person: ari, cents: 100 },
+          { person: dani, cents: -900 },
+        ],
+      }),
+    );
+    const rows = [...doc(html).querySelectorAll("#balances li")];
+    expect(rows.map((r) => r.querySelector(".amount")?.textContent)).toEqual(["$1.00", "$9.00"]);
+    // Owing and being owed look the same: no class marks one side.
+    expect(rows.map((r) => r.className)).toEqual(["", ""]);
+  });
+
   it("says when nobody owes anybody", () => {
     expect(text(housePage(house()))).toContain("Nobody owes anybody.");
   });

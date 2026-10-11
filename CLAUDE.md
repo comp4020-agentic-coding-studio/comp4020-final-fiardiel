@@ -1,4 +1,4 @@
-# The kitchen: rules for the agent
+# Serumah: rules for the agent
 
 These come from the argument in `README.md`. If a change would break one, stop and say so instead of working around it.
 

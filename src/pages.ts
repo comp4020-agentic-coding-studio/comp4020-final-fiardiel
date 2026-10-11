@@ -32,24 +32,27 @@ export function esc(text: string): string {
   return text.replace(/[&<>"']/g, (c) => ESCAPES[c]);
 }
 
-// Ink-blue notebook: warm paper, a serif title, rounded cards. Colour means one
-// thing only, the direction of money: ink blue for what you're owed,
+// Ink-blue notebook: warm paper, a serif title, rounded cards. On amounts,
+// colour means the direction of money: ink blue for what you're owed,
 // terracotta for what you owe. Both sides have the same size and weight, and
-// neither is red or green, so nobody is marked. Pills and buttons stay
-// neutral. Each housemate has a coloured initial so people are easy to tell
-// apart at a glance.
+// neither is red or green, so nobody is marked. The history pills say the kind
+// of entry instead, in two colours kept clear of both directions: mustard for
+// a bill, plum for a payment. Buttons stay neutral. Each housemate has a
+// coloured initial so people are easy to tell apart at a glance.
 const STYLE = `
   :root {
     color-scheme: light dark;
     --paper: #f8f6f2; --card: #ffffff; --ink: #1f2430; --muted: #6f7684;
     --rule: #e6e3dd; --accent: #2f4fa2; --on-accent: #ffffff; --pill: #eceae5;
     --owed: #2f4fa2; --owe: #b8643e; --strip-owed: #e6ebf7; --strip-owe: #f8e9e1;
+    --bill-bg: #f5e9c4; --bill-ink: #74570d; --paid-bg: #ebdcf3; --paid-ink: #6b3d84;
   }
   @media (prefers-color-scheme: dark) {
     :root {
       --paper: #13161f; --card: #1d2230; --ink: #e8ebf5; --muted: #9aa2b5;
       --rule: #2c3346; --accent: #8aa6ff; --on-accent: #13161f; --pill: #2a3142;
       --owed: #8aa6ff; --owe: #ef9a70; --strip-owed: #1d2847; --strip-owe: #3a2620;
+      --bill-bg: #3a3118; --bill-ink: #e6c766; --paid-bg: #33263e; --paid-ink: #d2abe8;
     }
   }
   * { box-sizing: border-box; }
@@ -98,6 +101,8 @@ const STYLE = `
   #history > li { padding: 0.75rem 0; border-top: 1px solid var(--rule); }
   .line { display: flex; align-items: baseline; gap: 0.5rem; }
   .pill { flex: none; padding: 0.05rem 0.55rem; border-radius: 999px; background: var(--pill); color: var(--muted); font-size: 0.72rem; font-weight: 700; }
+  .pill.bill { background: var(--bill-bg); color: var(--bill-ink); }
+  .pill.paid { background: var(--paid-bg); color: var(--paid-ink); }
   .what { flex: 1; min-width: 0; font-size: 1.05rem; font-weight: 650; overflow-wrap: anywhere; }
   .line .total { font-weight: 700; font-variant-numeric: tabular-nums; white-space: nowrap; }
   .by { display: flex; align-items: center; gap: 0.4rem; margin: 0.3rem 0 0.5rem; color: var(--muted); font-size: 0.85rem; }
@@ -296,7 +301,7 @@ function entryLine(entry: Entry, base: string, me: Person): string {
     const dispute = entry.toMe
       ? `<div class="actions">${postForm(`${base}/dispute`, { payment: String(entry.id) }, "Didn't get it", "", ICON_NOT_ARRIVED)}</div>`
       : "";
-    return `<li class="payment"><div class="line"><span class="pill">paid</span><span class="what">${what}</span><span class="total">${formatCents(entry.cents)}</span></div>${dispute}</li>`;
+    return `<li class="payment"><div class="line"><span class="pill paid">Paid</span><span class="what">${what}</span><span class="total">${formatCents(entry.cents)}</span></div>${dispute}</li>`;
   }
   const total = entry.shares.reduce((sum, s) => sum + s.cents, 0);
   const iPaid = entry.paidBy.id === me.id;
@@ -309,7 +314,7 @@ function entryLine(entry: Entry, base: string, me: Person): string {
   const remove = entry.mine
     ? `<div class="actions">${postForm(`${base}/delete`, { bill: String(entry.id) }, "Delete", "", ICON_DELETE)}</div>`
     : "";
-  return `<li class="bill"><div class="line"><span class="pill">bill</span><span class="what">${entry.note === "" ? "Bill" : esc(entry.note)}</span><span class="total">${formatCents(total)}</span></div><div class="by">${avatar(entry.paidBy, "small")}${name(entry.paidBy)} paid</div><ul class="chips">${chips}</ul>${remove}</li>`;
+  return `<li class="bill"><div class="line"><span class="pill bill">Bill</span><span class="what">${entry.note === "" ? "Bill" : esc(entry.note)}</span><span class="total">${formatCents(total)}</span></div><div class="by">${avatar(entry.paidBy, "small")}${name(entry.paidBy)} paid</div><ul class="chips">${chips}</ul>${remove}</li>`;
 }
 
 // The same top on every house page: which house, who you are, and a way out

@@ -102,7 +102,7 @@ describe("being someone in a house", () => {
     expect((await addBill(code, cookie, "Rice", { [id]: "5" })).status).toBe(303);
     const later = await housePage(code, cookie);
     expect(textOf(later)).toContain("you are Dani");
-    expect(historyOf(later)).toEqual([{ pill: "bill", what: "Rice", total: "$5.00", by: "You paid", chips: ["You $5.00"] }]);
+    expect(historyOf(later)).toEqual([{ pill: "Bill", what: "Rice", total: "$5.00", by: "You paid", chips: ["You $5.00"] }]);
   });
 
   it("recognises a returning person on the join page, but not a stranger", async () => {

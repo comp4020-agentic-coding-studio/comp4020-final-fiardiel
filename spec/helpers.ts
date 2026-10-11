@@ -44,7 +44,7 @@ export const buttonsOf = (html: string): string[] =>
 const lines = (html: string, selector: string): string[] =>
   [...parse(html).querySelectorAll(selector)].map((n) => (n.textContent ?? "").replace(/\s+/g, " ").trim());
 export const balancesOf = (html: string): string[] => lines(html, "#balances li");
-// Each history row as its parts: the pill ("bill" or "paid"), what it was
+// Each history row as its parts: the pill ("Bill" or "Paid"), what it was
 // for, the total, who paid, and the share chips.
 export const historyOf = (html: string) =>
   [...parse(html).querySelectorAll("#history > li")].map((li) => {

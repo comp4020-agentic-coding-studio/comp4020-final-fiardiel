@@ -123,8 +123,8 @@ describe("house page", () => {
       }),
     );
     expect(entries(html).map((e) => [e.pill, e.what, e.total])).toEqual([
-      ["paid", "Dani paid you", "$15.50"],
-      ["paid", "You paid Ari", "$5.00"],
+      ["Paid", "Dani paid you", "$15.50"],
+      ["Paid", "You paid Ari", "$5.00"],
     ]);
     const forms = [...doc(html).querySelectorAll('form[action="/h/ABC234/dispute"]')];
     expect(forms.map((f) => f.querySelector<HTMLInputElement>('input[name="payment"]')!.value)).toEqual(["7"]);
@@ -160,10 +160,12 @@ describe("house page", () => {
       }),
     );
     expect(entries(html)).toEqual([
-      { pill: "paid", what: "Dani paid you", total: "$5.00", by: "", chips: [] },
-      { pill: "bill", what: "Bill", total: "$6.00", by: "Dani paid", chips: ["You $3.00 (owe)", "Dani $3.00"] },
-      { pill: "bill", what: "Woolies", total: "$18.00", by: "You paid", chips: ["Ari $9.00 (owed)", "Dani $4.50 (owed)", "You $4.50"] },
+      { pill: "Paid", what: "Dani paid you", total: "$5.00", by: "", chips: [] },
+      { pill: "Bill", what: "Bill", total: "$6.00", by: "Dani paid", chips: ["You $3.00 (owe)", "Dani $3.00"] },
+      { pill: "Bill", what: "Woolies", total: "$18.00", by: "You paid", chips: ["Ari $9.00 (owed)", "Dani $4.50 (owed)", "You $4.50"] },
     ]);
+    // Bills and payments get pills of their own colour, so the two kinds tell apart at a glance.
+    expect([...doc(html).querySelectorAll("#history .pill")].map((p) => p.className)).toEqual(["pill paid", "pill bill", "pill bill"]);
     const deletes = [...doc(html).querySelectorAll('form[action="/h/ABC234/delete"]')];
     expect(deletes.map((f) => f.querySelector<HTMLInputElement>('input[name="bill"]')!.value)).toEqual(["1"]);
     expect(deletes[0].querySelector("button svg")).not.toBeNull();

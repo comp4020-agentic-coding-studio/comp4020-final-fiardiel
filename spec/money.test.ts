@@ -91,7 +91,7 @@ describe("payments", () => {
     expect((await post(`/h/${code}/pay`, cookies.Dina, { to: ids.Rafi, amount: "15.50" })).status).toBe(303);
     expect(textOf(await housePage(code, cookies.Dina))).toContain("Nobody owes anybody.");
     expect(textOf(await housePage(code, cookies.Rafi))).toContain("Nobody owes anybody.");
-    expect(historyOf(await housePage(code, cookies.Dina))[0]).toMatchObject({ pill: "paid", what: "You paid Rafi", total: "$15.50" });
+    expect(historyOf(await housePage(code, cookies.Dina))[0]).toMatchObject({ pill: "Paid", what: "You paid Rafi", total: "$15.50" });
   });
 
   it("brings the debt back when the receiver says the money never arrived", async () => {
@@ -102,7 +102,7 @@ describe("payments", () => {
     expect((await press(rafiPage, "Didn't get it", cookies.Rafi)).status).toBe(303);
     const dina = await housePage(code, cookies.Dina);
     expect(balancesOf(dina)).toEqual(["You owe Rafi $15.50"]);
-    expect(historyOf(dina).some((e) => e.pill === "paid")).toBe(false);
+    expect(historyOf(dina).some((e) => e.pill === "Paid")).toBe(false);
   });
 
   it("lets only the receiver dispute, and only once, even when two taps race", async () => {

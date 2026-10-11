@@ -46,7 +46,7 @@ I don't want to nag, or blame anyone for owing. My housemates are good people; t
 
 **Judged by looking:** whether a housemate can tell me who they owe, and how much, in about three seconds with the phone at arm's length.
 
-**Not true yet:** the judged test. The page has no real design yet, so it doesn't pass.
+After the redesign I tried it on my phone, and in my opinion it passes.
 
 ## What I read and looked at
 

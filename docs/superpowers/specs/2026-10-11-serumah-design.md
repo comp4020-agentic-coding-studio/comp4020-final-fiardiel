@@ -72,11 +72,20 @@ These are the author's decisions.
 - Every change above reaches every open page in that house within about a
   second, without a reload.
 
-### Next (Crit 10)
+### Next (if time allows)
 
-Chores: a list of chores, each with an order of housemates and whose turn it
-is. The person whose turn it is marks it done and the turn passes on; no clock,
-no "overdue". Swapping a turn waits for the other person to accept.
+- **Chores**, the second half of the house: a list of chores, each with an
+  order of housemates and whose turn it is. The person whose turn it is marks
+  it done and the turn passes on; no clock, no "overdue". Swapping a turn waits
+  for the other person to accept.
+- **Editing a bill**: the payer gets an edit button on their own bill.
+- **Forms on their own page** (the author's idea after trying the redesign):
+  "Add a bill" and "Record a payment" open as their own page (or a sheet) from
+  a button on the house page, so the house page is only balances and history.
+  Less on one screen means less to take in.
+- **Short history, with the rest on its own page** (same): the house page shows
+  only the 5 most recent entries, with "See all history" opening the full list.
+- **Reading receipts (OCR)**, to fill the amount boxes.
 
 ### Not built, with reasons for the README
 

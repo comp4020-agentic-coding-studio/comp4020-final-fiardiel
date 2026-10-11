@@ -1,26 +1,16 @@
 import { JSDOM } from "jsdom";
 import { describe, expect, it } from "vitest";
-import { esc, handoffPage, homePage, joinPage, kitchenPage, layout } from "../../src/pages.ts";
-import type { KitchenView } from "../../src/pages.ts";
+import { esc, homePage, housePage, joinPage, layout } from "../../src/pages.ts";
+import type { HouseView } from "../../src/pages.ts";
 
 const dani = { id: 1, name: "Dani" };
 const rafi = { id: 2, name: "Rafi" };
+const ari = { id: 3, name: "Ari" };
 
 const doc = (html: string) => new JSDOM(html).window.document;
 const text = (html: string): string => doc(html).body.textContent ?? "";
 const buttons = (html: string): string[] =>
   [...doc(html).querySelectorAll("button")].map((b) => b.textContent ?? "");
-
-const view = (over: Partial<KitchenView> = {}): KitchenView => ({
-  code: "ABC234",
-  me: rafi,
-  cooking: [],
-  state: "clean",
-  responsible: null,
-  lastCooked: null,
-  iAmCooking: false,
-  ...over,
-});
 
 describe("esc", () => {
   it("escapes the characters that matter in HTML text and attributes", () => {
@@ -37,67 +27,152 @@ describe("layout", () => {
   });
 });
 
-describe("kitchen page", () => {
-  it("shows names as text, never as markup", () => {
-    const html = kitchenPage(view({ cooking: [{ id: 3, name: "<img src=x onerror=alert(1)>" }] }));
-    expect(doc(html).querySelector("img")).toBeNull();
-    expect(text(html)).toContain("<img src=x onerror=alert(1)>");
-  });
-
-  it("shows the person who left it messy as text, never as markup", () => {
-    const html = kitchenPage(view({ state: "messy", responsible: { id: 9, name: "<img src=x onerror=alert(1)>" } }));
-    expect(doc(html).querySelector("img")).toBeNull();
-    expect(text(html)).toContain("<img src=x onerror=alert(1)>");
-  });
-
-  it("links to the join page from the \"you are\" line, as a link and not a button", () => {
-    const html = kitchenPage(view());
-    const link = doc(html).querySelector('a[href="/h/ABC234/join"]');
-    expect(link?.textContent).toBe("Not you?");
-    expect(buttons(html)).not.toContain("Not you?");
-  });
-
-  it("says who is cooking now, or that nobody is", () => {
-    expect(text(kitchenPage(view()))).toContain("Nobody right now.");
-    const html = kitchenPage(view({ cooking: [dani, rafi] }));
-    expect([...doc(html).querySelectorAll("li .name")].map((n) => n.textContent)).toEqual(["Dani", "Rafi"]);
-  });
-
-  it("lets you end someone else's session from the list, but not your own", () => {
-    const html = kitchenPage(view({ me: rafi, cooking: [dani, rafi], iAmCooking: true }));
-    expect(buttons(html)).toEqual(["End Dani's session", "I'm done", "Mark messy"]);
-  });
-
-  it("names the responsible person only while the kitchen is messy", () => {
-    const messy = text(kitchenPage(view({ state: "messy", responsible: dani })));
-    expect(messy).toContain("The kitchen is messy");
-    expect(messy).toContain("Left by Dani.");
-
-    const clean = text(kitchenPage(view({ state: "clean", responsible: dani })));
-    expect(clean).toContain("The kitchen is clean");
-    expect(clean).not.toContain("Left by");
-  });
-
-  it("always shows who cooked last as a plain fact", () => {
-    expect(text(kitchenPage(view({ state: "clean", lastCooked: dani })))).toContain("Last cooked: Dani");
-    expect(text(kitchenPage(view({ state: "messy", responsible: dani, lastCooked: rafi })))).toContain(
-      "Last cooked: Rafi",
-    );
-    expect(text(kitchenPage(view()))).not.toContain("Last cooked");
-  });
-
-  it("offers only the buttons that change something", () => {
-    expect(buttons(kitchenPage(view({ iAmCooking: false, state: "clean" })))).toEqual(["I'm cooking", "Mark messy"]);
-    expect(buttons(kitchenPage(view({ iAmCooking: true, state: "messy" })))).toEqual(["I'm done", "Mark clean"]);
-  });
+const house = (over: Partial<HouseView> = {}): HouseView => ({
+  code: "ABC234",
+  me: rafi,
+  people: [ari, dani, rafi],
+  balances: [],
+  toAnswer: [],
+  waiting: [],
+  history: [],
+  ...over,
 });
+const live = (html: string) => doc(html).querySelector("#live");
+const items = (html: string, selector: string): string[] =>
+  [...doc(html).querySelectorAll(selector)].map((n) => (n.textContent ?? "").replace(/\s+/g, " ").trim());
 
-describe("handoff page", () => {
-  it("asks whether the kitchen was left clean or messy, and can be skipped", () => {
-    const html = handoffPage("ABC234");
-    expect(text(html)).toContain("Left the kitchen clean or messy?");
-    expect(buttons(html)).toEqual(["Left it clean", "Left it messy"]);
-    expect(doc(html).querySelector('a[href="/h/ABC234"]')?.textContent).toBe("Skip");
+describe("house page", () => {
+  it("says who you are and links to the join page", () => {
+    const html = housePage(house());
+    expect(text(html)).toContain("you are Rafi");
+    expect(doc(html).querySelector('a[href="/h/ABC234/join"]')).not.toBeNull();
+  });
+
+  it("states balances plainly, in name order, never ranked by amount", () => {
+    const html = housePage(
+      house({
+        balances: [
+          { person: ari, cents: 100 },
+          { person: dani, cents: -900 },
+        ],
+      }),
+    );
+    expect(items(html, "#balances li")).toEqual(["Ari owes you $1.00", "You owe Dani $9.00"]);
+  });
+
+  it("says when nobody owes anybody", () => {
+    expect(text(housePage(house()))).toContain("Nobody owes anybody.");
+  });
+
+  it("asks you about payments made to you, with a button each way", () => {
+    const html = housePage(house({ toAnswer: [{ id: 7, from: dani, cents: 1550 }] }));
+    expect(text(html)).toContain("Dani says they paid you $15.50");
+    expect(buttons(html)).toEqual(expect.arrayContaining(["Got it", "Didn't get it"]));
+    const form = [...doc(html).querySelectorAll("form")].find((f) => f.textContent === "Got it")!;
+    expect(form.getAttribute("action")).toBe("/h/ABC234/answer");
+    expect(form.querySelector<HTMLInputElement>('input[name="payment"]')!.value).toBe("7");
+  });
+
+  it("shows payments you made that are still waiting", () => {
+    expect(text(housePage(house({ waiting: [{ to: dani, cents: 500 }] })))).toContain("You paid Dani $5.00");
+  });
+
+  it("lists the history, with delete only on your own bills", () => {
+    const html = housePage(
+      house({
+        history: [
+          { kind: "payment", from: dani, to: rafi, cents: 500, pending: true },
+          { kind: "bill", id: 2, paidBy: dani, note: "", shares: [{ person: rafi, cents: 300 }], mine: false },
+          {
+            kind: "bill",
+            id: 1,
+            paidBy: rafi,
+            note: "Woolies",
+            shares: [
+              { person: ari, cents: 900 },
+              { person: dani, cents: 450 },
+            ],
+            mine: true,
+          },
+        ],
+      }),
+    );
+    const lines = items(html, "#history li");
+    expect(lines[0]).toContain("Dani paid Rafi $5.00");
+    expect(lines[0]).toContain("waiting for Rafi");
+    expect(lines[1]).toContain("Dani paid $3.00 for a bill: Rafi $3.00");
+    expect(lines[2]).toContain("Rafi paid $13.50 for Woolies: Ari $9.00, Dani $4.50");
+    const deletes = [...doc(html).querySelectorAll('form[action="/h/ABC234/delete"]')];
+    expect(deletes.map((f) => f.querySelector<HTMLInputElement>('input[name="bill"]')!.value)).toEqual(["1"]);
+  });
+
+  it("shows names and notes as text, never as markup", () => {
+    const evil = { id: 4, name: "<b>x</b>" };
+    const html = housePage(
+      house({
+        people: [evil, rafi],
+        balances: [{ person: evil, cents: 100 }],
+        history: [{ kind: "bill", id: 1, paidBy: evil, note: "<i>n</i>", shares: [{ person: rafi, cents: 100 }], mine: false }],
+        draft: { note: "<i>n</i>", total: "", amounts: {}, ticked: [], message: "<b>x</b>'s amount" },
+      }),
+    );
+    expect(html).not.toContain("<b>x</b>");
+    expect(html).not.toContain("<i>n</i>");
+    expect(text(html)).toContain("<b>x</b> owes you $1.00");
+  });
+
+  it("keeps the forms outside the live section, so an update never wipes them", () => {
+    const html = housePage(house());
+    expect(live(html)!.getAttribute("data-base")).toBe("/h/ABC234");
+    expect(doc(html).querySelector('form[action="/h/ABC234/bill"]')).not.toBeNull();
+    expect(doc(html).querySelector('form[action="/h/ABC234/pay"]')).not.toBeNull();
+    expect(live(html)!.querySelector('form[action="/h/ABC234/bill"], form[action="/h/ABC234/pay"]')).toBeNull();
+  });
+
+  it("listens for changes and re-fetches on every reconnect", () => {
+    const script = doc(housePage(house())).querySelector("script")?.textContent ?? "";
+    expect(script).toContain("EventSource");
+    expect(script).toContain('"changed"');
+    expect(script).toContain('"open"');
+  });
+
+  it("offers an amount box and a tick for everyone, ticked by default", () => {
+    const d = doc(housePage(house()));
+    for (const p of [ari, dani, rafi]) {
+      expect(d.querySelector(`input[name="amount_${p.id}"]`), p.name).not.toBeNull();
+      expect(d.querySelector<HTMLInputElement>(`input[name="with_${p.id}"]`)!.checked, p.name).toBe(true);
+    }
+  });
+
+  it("refills the bill form from a draft, with its message", () => {
+    const d = doc(
+      housePage(
+        house({
+          draft: { note: "Woolies", total: "10", amounts: { 3: "3.33", 1: "", 2: "3.34" }, ticked: [3, 2], message: "Check the amounts" },
+        }),
+      ),
+    );
+    expect(d.querySelector<HTMLInputElement>('input[name="note"]')!.value).toBe("Woolies");
+    expect(d.querySelector<HTMLInputElement>('input[name="amount_3"]')!.value).toBe("3.33");
+    expect(d.querySelector<HTMLInputElement>('input[name="with_1"]')!.checked).toBe(false);
+    expect(d.querySelector('[role="alert"]')!.textContent).toBe("Check the amounts");
+  });
+
+  it("offers to pay only other people, and says so when you're alone", () => {
+    const d = doc(housePage(house()));
+    expect([...d.querySelectorAll('select[name="to"] option')].map((o) => o.textContent)).toEqual(["Ari", "Dani"]);
+    expect(text(housePage(house({ people: [rafi] })))).toContain("Nobody else is in the house yet");
+  });
+
+  it("never nags", () => {
+    const html = housePage(
+      house({
+        balances: [{ person: dani, cents: -900 }],
+        waiting: [{ to: ari, cents: 100 }],
+        toAnswer: [{ id: 1, from: dani, cents: 100 }],
+      }),
+    );
+    expect(text(html)).not.toMatch(/\b(overdue|late|remind|reminder|urgent)\b/i);
   });
 });
 

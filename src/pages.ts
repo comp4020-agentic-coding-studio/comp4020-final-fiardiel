@@ -1,15 +1,23 @@
-import { NAME_MAX } from "./names.ts";
-import type { KitchenState } from "./rules.ts";
+import { formatCents } from "./money.ts";
+import { NAME_MAX, NOTE_MAX } from "./names.ts";
 import type { Person } from "./store.ts";
 
-export type KitchenView = {
+export type Draft = { note: string; total: string; amounts: Record<number, string>; ticked: number[]; message?: string };
+
+export type Entry =
+  | { kind: "bill"; id: number; paidBy: Person; note: string; shares: { person: Person; cents: number }[]; mine: boolean }
+  | { kind: "payment"; from: Person; to: Person; cents: number; pending: boolean };
+
+export type HouseView = {
   code: string;
   me: Person;
-  cooking: Person[];
-  state: KitchenState;
-  responsible: Person | null;
-  lastCooked: Person | null;
-  iAmCooking: boolean;
+  people: Person[];
+  // Non-zero only, in name order. Positive: they owe me. Negative: I owe them.
+  balances: { person: Person; cents: number }[];
+  toAnswer: { id: number; from: Person; cents: number }[];
+  waiting: { to: Person; cents: number }[];
+  history: Entry[];
+  draft?: Draft;
 };
 
 const ESCAPES: Record<string, string> = {
@@ -37,9 +45,12 @@ const STYLE = `
   input { padding: 0 0.5rem; }
   .quiet { opacity: 0.7; }
   li form { display: inline; margin: 0 0 0 0.5rem; }
+  fieldset { border: 0; padding: 0; margin: 0.5rem 0; }
+  fieldset p { margin: 0.25rem 0; }
+  #live li { margin: 0.25rem 0; }
 `;
 
-export function layout(title: string, body: string): string {
+export function layout(title: string, body: string, script = ""): string {
   return `<!doctype html>
 <html lang="en-AU">
   <head>
@@ -53,6 +64,7 @@ export function layout(title: string, body: string): string {
 ${body}
       <p class="quiet"><a href="/readme/">About this app</a></p>
     </main>
+    ${script === "" ? "" : `<script>${script}</script>`}
   </body>
 </html>
 `;
@@ -75,9 +87,9 @@ export function homePage(message?: string, mine: { code: string; name: string }[
       <h2>Your houses</h2>
       <ul>${mine.map((h) => `<li><a href="/h/${esc(h.code)}">${esc(h.code)}</a> as <strong>${esc(h.name)}</strong></li>`).join("")}</ul>`;
   return layout(
-    "Kitchen",
-    `      <h1>Kitchen</h1>
-      <p>See who is cooking in your house, and whether the kitchen was left clean.</p>
+    "Serumah",
+    `      <h1>Serumah</h1>
+      <p>Split your house's bills and see who owes whom.</p>
       ${alertLine(message)}${houses}
       <form method="post" action="/houses">
         <button type="submit">Start a new house</button>
@@ -94,7 +106,7 @@ export function joinPage(code: string, people: Person[], message?: string, curre
     current === null
       ? ""
       : `
-      <p>You're already in this house as <strong>${esc(current.name)}</strong>. <a href="/h/${esc(code)}">Go to the kitchen</a></p>`;
+      <p>You're already in this house as <strong>${esc(current.name)}</strong>. <a href="/h/${esc(code)}">Go to your house</a></p>`;
   const claims =
     people.length === 0
       ? ""
@@ -113,50 +125,121 @@ export function joinPage(code: string, people: Person[], message?: string, curre
   );
 }
 
-export function kitchenPage(view: KitchenView): string {
-  const base = `/h/${view.code}`;
-  // Anyone can end someone else's session, so a forgotten "I'm done" never
-  // leaves a housemate cooking overnight. Your own session ends with "I'm done".
-  const endButton = (p: Person): string =>
-    p.id === view.me.id ? "" : postForm(`${base}/cook`, { action: "end", person: String(p.id) }, `End ${p.name}'s session`);
-  const cooking =
-    view.cooking.length === 0
-      ? "<p>Nobody right now.</p>"
-      : `<ul>${view.cooking.map((p) => `<li><span class="name">${esc(p.name)}</span>${endButton(p)}</li>`).join("")}</ul>`;
-  const left =
-    view.state === "messy" && view.responsible !== null
-      ? `<p>Left by <strong>${esc(view.responsible.name)}</strong>.</p>`
-      : "";
-  const last = view.lastCooked === null ? "" : `<p class="quiet">Last cooked: ${esc(view.lastCooked.name)}</p>`;
-  const cookButton = view.iAmCooking
-    ? postForm(`${base}/cook`, { action: "stop" }, "I'm done")
-    : postForm(`${base}/cook`, { action: "start" }, "I'm cooking");
-  const markButton =
-    view.state === "messy"
-      ? postForm(`${base}/mark`, { state: "clean" }, "Mark clean")
-      : postForm(`${base}/mark`, { state: "messy" }, "Mark messy");
-  return layout(
-    "Kitchen",
-    `      <h1>Kitchen</h1>
-      <p class="quiet">House <strong>${esc(view.code)}</strong> · you are <strong>${esc(view.me.name)}</strong> · <a href="${esc(base)}/join">Not you?</a></p>
-      <h2>Cooking now</h2>
-      ${cooking}
-      <h2>The kitchen is ${view.state}</h2>
-      ${left}
-      ${last}
-      ${cookButton}
-      ${markButton}`,
-  );
+// Live updates: the server says "changed" on this house's event stream, and
+// the page fetches itself again and swaps in the new #live section. The forms
+// sit outside #live, so a half-typed bill is never wiped. The page also
+// re-fetches whenever the stream (re)opens, so someone coming back, or whose
+// connection dropped, sees the current state. Without script, every form still
+// works; only the live updates are lost.
+const LIVE_SCRIPT = `
+  let live = document.getElementById("live");
+  const base = live.dataset.base;
+  async function refresh() {
+    const res = await fetch(base, { cache: "no-store" });
+    if (!res.ok) return;
+    const next = new DOMParser().parseFromString(await res.text(), "text/html").getElementById("live");
+    if (next) {
+      live.replaceWith(next);
+      live = next;
+    }
+  }
+  const events = new EventSource(base + "/events");
+  events.addEventListener("changed", () => refresh().catch(() => {}));
+  events.addEventListener("open", () => refresh().catch(() => {}));
+`;
+
+function balanceLine(b: { person: Person; cents: number }): string {
+  const name = `<span class="name">${esc(b.person.name)}</span>`;
+  return b.cents > 0
+    ? `<li>${name} owes you ${formatCents(b.cents)}</li>`
+    : `<li>You owe ${name} ${formatCents(-b.cents)}</li>`;
 }
 
-export function handoffPage(code: string): string {
-  const base = `/h/${code}`;
+function entryLine(entry: Entry, base: string): string {
+  if (entry.kind === "payment") {
+    const waiting = entry.pending ? ` <span class="quiet">(waiting for ${esc(entry.to.name)})</span>` : "";
+    return `<li>${esc(entry.from.name)} paid ${esc(entry.to.name)} ${formatCents(entry.cents)}${waiting}</li>`;
+  }
+  const total = entry.shares.reduce((sum, s) => sum + s.cents, 0);
+  const what = entry.note === "" ? "a bill" : esc(entry.note);
+  const shares = entry.shares.map((s) => `${esc(s.person.name)} ${formatCents(s.cents)}`).join(", ");
+  const remove = entry.mine ? postForm(`${base}/delete`, { bill: String(entry.id) }, "Delete") : "";
+  return `<li>${esc(entry.paidBy.name)} paid ${formatCents(total)} for ${what}: ${shares}${remove}</li>`;
+}
+
+export function housePage(view: HouseView): string {
+  const base = `/h/${view.code}`;
+  const draft = view.draft ?? { note: "", total: "", amounts: {}, ticked: view.people.map((p) => p.id) };
+
+  const balances =
+    view.balances.length === 0
+      ? `<p id="balances">Nobody owes anybody.</p>`
+      : `<ul id="balances">${view.balances.map(balanceLine).join("")}</ul>`;
+  const toAnswer =
+    view.toAnswer.length === 0
+      ? ""
+      : `
+        <h2>Did you get these?</h2>
+        <ul>${view.toAnswer
+          .map(
+            (p) =>
+              `<li>${esc(p.from.name)} says they paid you ${formatCents(p.cents)} ${postForm(`${base}/answer`, { payment: String(p.id), answer: "received" }, "Got it")}${postForm(`${base}/answer`, { payment: String(p.id), answer: "rejected" }, "Didn't get it")}</li>`,
+          )
+          .join("")}</ul>`;
+  const waiting =
+    view.waiting.length === 0
+      ? ""
+      : `
+        <h2>Waiting for them to confirm</h2>
+        <ul>${view.waiting.map((p) => `<li>You paid ${esc(p.to.name)} ${formatCents(p.cents)}</li>`).join("")}</ul>`;
+  const history =
+    view.history.length === 0
+      ? `<p id="history">No bills yet.</p>`
+      : `<ul id="history">${view.history.map((e) => entryLine(e, base)).join("")}</ul>`;
+
+  const rows = view.people
+    .map(
+      (p) =>
+        `<p><label><input type="checkbox" name="with_${p.id}"${draft.ticked.includes(p.id) ? " checked" : ""} /> ${esc(p.name)}</label> <input name="amount_${p.id}" inputmode="decimal" size="8" autocomplete="off" value="${esc(draft.amounts[p.id] ?? "")}" aria-label="${esc(p.name)}'s amount" /></p>`,
+    )
+    .join("\n          ");
+  const others = view.people.filter((p) => p.id !== view.me.id);
+  const payForm =
+    others.length === 0
+      ? `<p class="quiet">Nobody else is in the house yet. Share the code <strong>${esc(view.code)}</strong>.</p>`
+      : `<form method="post" action="${esc(base)}/pay">
+        <label>To <select name="to">${others.map((p) => `<option value="${p.id}">${esc(p.name)}</option>`).join("")}</select></label>
+        <label>Amount <input name="amount" inputmode="decimal" size="8" required autocomplete="off" /></label>
+        <button type="submit">I paid this</button>
+      </form>`;
+
+  // "Add bill" comes first so pressing Enter in a box adds the bill rather
+  // than refilling the form.
   return layout(
-    "Leaving the kitchen",
-    `      <h1>Left the kitchen clean or messy?</h1>
-      ${postForm(`${base}/mark`, { state: "clean" }, "Left it clean")}
-      ${postForm(`${base}/mark`, { state: "messy" }, "Left it messy")}
-      <p><a href="${esc(base)}">Skip</a></p>`,
+    "Serumah",
+    `      <h1>Serumah</h1>
+      <p class="quiet">House <strong>${esc(view.code)}</strong> · you are <strong>${esc(view.me.name)}</strong> · <a href="${esc(base)}/join">Not you?</a></p>
+      <section id="live" data-base="${esc(base)}">
+        <h2>Balances</h2>
+        ${balances}${toAnswer}${waiting}
+        <h2>History</h2>
+        ${history}
+      </section>
+      <h2>Add a bill you paid</h2>
+      <form method="post" action="${esc(base)}/bill">
+        ${alertLine(draft.message)}
+        <label>What for <input name="note" maxlength="${NOTE_MAX}" autocomplete="off" value="${esc(draft.note)}" /></label>
+        <fieldset>
+          <legend>Who owes what (in dollars)</legend>
+          ${rows}
+        </fieldset>
+        <button type="submit" name="intent" value="add">Add bill</button>
+        <p><label>Or split a total equally between the ticked people <input name="total" inputmode="decimal" size="8" autocomplete="off" value="${esc(draft.total)}" /></label>
+        <button type="submit" name="intent" value="fill">Split equally</button></p>
+      </form>
+      <h2>Record a payment you made</h2>
+      ${payForm}`,
+    LIVE_SCRIPT,
   );
 }
 

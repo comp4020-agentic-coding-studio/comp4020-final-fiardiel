@@ -4,7 +4,7 @@ These come from the argument in `README.md`. If a change would break one, stop a
 
 ## What the app must never do
 
-- **Count a payment the receiver hasn't confirmed.** "I paid Dina back" changes no balance until Dina says she got it. A payment she says she didn't get is gone.
+- **Count a payment the receiver hasn't confirmed.** "I paid Dina back" changes no balance until Dina confirms getting it. A payment Dina says never arrived is gone.
 - **Let anyone act for the person concerned.** Only the payer deletes their bill; only the receiver answers a payment.
 - **Get the money wrong.** Amounts are whole cents everywhere. An equal split adds up to its total exactly. Balances are worked out from the bills and received payments every time, never stored.
 - **Nag or shame.** No notifications, reminders, "overdue", rankings of who owes most, or emphasis on debts. Balances are plain facts in name order. The app shows the state when someone looks.

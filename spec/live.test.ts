@@ -39,7 +39,7 @@ describe("live updates", () => {
     }
   });
 
-  it("tells the house when a payment is made and when it is answered", async () => {
+  it("tells the house when a payment is made and when it is disputed", async () => {
     const { code, cookies, ids } = await setUpHouse("Rafi", "Dina");
     const dina = await openEvents(code, cookies.Dina);
     try {
@@ -48,7 +48,7 @@ describe("live updates", () => {
       expect(await dina.waitFor(CHANGED, 1000)).toBe(true);
       const page = await housePage(code, cookies.Rafi);
       const id = /name="payment" value="(\d+)"/.exec(page)?.[1] ?? "";
-      await post(`/h/${code}/answer`, cookies.Rafi, { payment: id, answer: "received" });
+      expect((await post(`/h/${code}/dispute`, cookies.Rafi, { payment: id })).status).toBe(303);
       expect(await dina.waitFor(CHANGED, 1000)).toBe(true);
     } finally {
       dina.close();

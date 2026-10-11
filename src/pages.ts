@@ -6,7 +6,7 @@ export type Draft = { note: string; total: string; amounts: Record<number, strin
 
 export type Entry =
   | { kind: "bill"; id: number; paidBy: Person; note: string; shares: { person: Person; cents: number }[]; mine: boolean }
-  | { kind: "payment"; from: Person; to: Person; cents: number; pending: boolean };
+  | { kind: "payment"; id: number; from: Person; to: Person; cents: number; toMe: boolean };
 
 export type HouseView = {
   code: string;
@@ -14,8 +14,6 @@ export type HouseView = {
   people: Person[];
   // Non-zero only, in name order. Positive: they owe me. Negative: I owe them.
   balances: { person: Person; cents: number }[];
-  toAnswer: { id: number; from: Person; cents: number }[];
-  waiting: { to: Person; cents: number }[];
   history: Entry[];
   draft?: Draft;
   // Said once, above everything, e.g. when a tap arrived after someone else's.
@@ -190,8 +188,9 @@ function balanceLine(b: { person: Person; cents: number }): string {
 
 function entryLine(entry: Entry, base: string): string {
   if (entry.kind === "payment") {
-    const waiting = entry.pending ? ` <span class="quiet">(waiting for ${esc(entry.to.name)})</span>` : "";
-    return `<li>${esc(entry.from.name)} paid ${esc(entry.to.name)} ${formatCents(entry.cents)}${waiting}</li>`;
+    // Only the receiver can see whether the money arrived, so only they can say it didn't.
+    const dispute = entry.toMe ? postForm(`${base}/dispute`, { payment: String(entry.id) }, "Didn't get it") : "";
+    return `<li>${esc(entry.from.name)} paid ${esc(entry.to.name)} ${formatCents(entry.cents)}${dispute}</li>`;
   }
   const total = entry.shares.reduce((sum, s) => sum + s.cents, 0);
   const what = entry.note === "" ? "a bill" : esc(entry.note);
@@ -208,23 +207,6 @@ export function housePage(view: HouseView): string {
     view.balances.length === 0
       ? `<p id="balances">Nobody owes anybody.</p>`
       : `<ul id="balances">${view.balances.map(balanceLine).join("")}</ul>`;
-  const toAnswer =
-    view.toAnswer.length === 0
-      ? ""
-      : `
-        <h2>Did you get these?</h2>
-        <ul>${view.toAnswer
-          .map(
-            (p) =>
-              `<li>${esc(p.from.name)} says they paid you ${formatCents(p.cents)} ${postForm(`${base}/answer`, { payment: String(p.id), answer: "received" }, "Got it")}${postForm(`${base}/answer`, { payment: String(p.id), answer: "rejected" }, "Didn't get it")}</li>`,
-          )
-          .join("")}</ul>`;
-  const waiting =
-    view.waiting.length === 0
-      ? ""
-      : `
-        <h2>Waiting for them to confirm</h2>
-        <ul>${view.waiting.map((p) => `<li>You paid ${esc(p.to.name)} ${formatCents(p.cents)}</li>`).join("")}</ul>`;
   const history =
     view.history.length === 0
       ? `<p id="history">No bills yet.</p>`
@@ -255,7 +237,7 @@ export function housePage(view: HouseView): string {
       ${view.notice ? `<p role="status">${esc(view.notice)}</p>` : ""}
       <section id="live" data-base="${esc(base)}" data-people="${view.people.map((p) => p.id).join(",")}">
         <h2>Balances</h2>
-        ${balances}${toAnswer}${waiting}
+        ${balances}
         <h2>History</h2>
         ${history}
       </section>

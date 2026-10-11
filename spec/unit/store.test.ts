@@ -185,14 +185,14 @@ describe("bills", () => {
 });
 
 describe("payments", () => {
-  it("records a payment as pending, between two people in the house", () => {
+  it("counts a payment as soon as it is recorded, between two people in the house", () => {
     const store = memory();
     const {
       code,
       ids: [rafi, dina],
     } = house(store, "Rafi", "Dina");
     const id = store.recordPayment(code, dina, rafi, 1550);
-    expect(store.payments(code)).toMatchObject([{ id, fromId: dina, toId: rafi, cents: 1550, status: "pending" }]);
+    expect(store.payments(code)).toMatchObject([{ id, fromId: dina, toId: rafi, cents: 1550, status: "received" }]);
   });
 
   it("refuses paying yourself, nobody, an outsider, or an amount out of range", () => {
@@ -210,21 +210,21 @@ describe("payments", () => {
     expect(store.payments(code)).toEqual([]);
   });
 
-  it("lets only the receiver answer, only once", () => {
+  it("lets only the receiver say a payment never arrived, only once", () => {
     const store = memory();
     const {
       code,
       ids: [rafi, dina],
     } = house(store, "Rafi", "Dina");
     const id = store.recordPayment(code, dina, rafi, 100)!;
-    expect(store.answerPayment(code, id, dina, "received")).toBe("not_yours");
-    expect(store.answerPayment(code, id, rafi, "received")).toBe("done");
-    expect(store.answerPayment(code, id, rafi, "rejected")).toBe("already");
-    expect(store.payments(code)[0].status).toBe("received");
-    expect(store.answerPayment(code, 9999, rafi, "received")).toBe("gone");
+    expect(store.disputePayment(code, id, dina)).toBe("not_yours");
+    expect(store.disputePayment(code, id, rafi)).toBe("done");
+    expect(store.disputePayment(code, id, rafi)).toBe("already");
+    expect(store.payments(code)[0].status).toBe("rejected");
+    expect(store.disputePayment(code, 9999, rafi)).toBe("gone");
   });
 
-  it("does not let another house answer a payment", () => {
+  it("does not let another house dispute a payment", () => {
     const store = memory();
     const {
       code,
@@ -232,8 +232,8 @@ describe("payments", () => {
     } = house(store, "Rafi", "Dina");
     const other = house(store, "Zed");
     const id = store.recordPayment(code, dina, rafi, 100)!;
-    expect(store.answerPayment(other.code, id, other.ids[0], "received")).toBe("gone");
-    expect(store.payments(code)[0].status).toBe("pending");
+    expect(store.disputePayment(other.code, id, other.ids[0])).toBe("gone");
+    expect(store.payments(code)[0].status).toBe("received");
   });
 });
 
@@ -247,8 +247,7 @@ describe("persistence", () => {
       const rafi = joinOk(first, code, "Rafi");
       const dina = joinOk(first, code, "Dina");
       first.addBill(code, rafi.person.id, "Groceries", [{ personId: dina.person.id, cents: 2000 }]);
-      const paid = first.recordPayment(code, dina.person.id, rafi.person.id, 2000)!;
-      first.answerPayment(code, paid, rafi.person.id, "received");
+      first.recordPayment(code, dina.person.id, rafi.person.id, 2000);
       first.close();
 
       const second = new Store(path);

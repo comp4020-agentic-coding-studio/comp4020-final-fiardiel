@@ -32,8 +32,6 @@ const house = (over: Partial<HouseView> = {}): HouseView => ({
   me: rafi,
   people: [ari, dani, rafi],
   balances: [],
-  toAnswer: [],
-  waiting: [],
   history: [],
   ...over,
 });
@@ -64,24 +62,33 @@ describe("house page", () => {
     expect(text(housePage(house()))).toContain("Nobody owes anybody.");
   });
 
-  it("asks you about payments made to you, with a button each way", () => {
-    const html = housePage(house({ toAnswer: [{ id: 7, from: dani, cents: 1550 }] }));
-    expect(text(html)).toContain("Dani says they paid you $15.50");
-    expect(buttons(html)).toEqual(expect.arrayContaining(["Got it", "Didn't get it"]));
-    const form = [...doc(html).querySelectorAll("form")].find((f) => f.textContent === "Got it")!;
-    expect(form.getAttribute("action")).toBe("/h/ABC234/answer");
-    expect(form.querySelector<HTMLInputElement>('input[name="payment"]')!.value).toBe("7");
+  it("lets you say a payment to you never arrived, from the history, and only payments to you", () => {
+    const html = housePage(
+      house({
+        history: [
+          { kind: "payment", id: 7, from: dani, to: rafi, cents: 1550, toMe: true },
+          { kind: "payment", id: 8, from: dani, to: ari, cents: 500, toMe: false },
+        ],
+      }),
+    );
+    const lines = items(html, "#history li");
+    expect(lines[0]).toContain("Dani paid Rafi $15.50");
+    const forms = [...doc(html).querySelectorAll('form[action="/h/ABC234/dispute"]')];
+    expect(forms.map((f) => f.querySelector<HTMLInputElement>('input[name="payment"]')!.value)).toEqual(["7"]);
+    expect(forms[0].textContent).toBe("Didn't get it");
   });
 
-  it("shows payments you made that are still waiting", () => {
-    expect(text(housePage(house({ waiting: [{ to: dani, cents: 500 }] })))).toContain("You paid Dani $5.00");
+  it("asks nobody to confirm anything", () => {
+    const html = housePage(house({ history: [{ kind: "payment", id: 7, from: dani, to: rafi, cents: 1550, toMe: true }] }));
+    // The page's words only, not its script.
+    expect(doc(html).querySelector("main")!.textContent).not.toMatch(/confirm|waiting|did you get/i);
   });
 
   it("lists the history, with delete only on your own bills", () => {
     const html = housePage(
       house({
         history: [
-          { kind: "payment", from: dani, to: rafi, cents: 500, pending: true },
+          { kind: "payment", id: 9, from: dani, to: ari, cents: 500, toMe: false },
           { kind: "bill", id: 2, paidBy: dani, note: "", shares: [{ person: rafi, cents: 300 }], mine: false },
           {
             kind: "bill",
@@ -98,8 +105,7 @@ describe("house page", () => {
       }),
     );
     const lines = items(html, "#history li");
-    expect(lines[0]).toContain("Dani paid Rafi $5.00");
-    expect(lines[0]).toContain("waiting for Rafi");
+    expect(lines[0]).toBe("Dani paid Ari $5.00");
     expect(lines[1]).toContain("Dani paid $3.00 for a bill: Rafi $3.00");
     expect(lines[2]).toContain("Rafi paid $13.50 for Woolies: Ari $9.00, Dani $4.50");
     const deletes = [...doc(html).querySelectorAll('form[action="/h/ABC234/delete"]')];
@@ -168,8 +174,7 @@ describe("house page", () => {
     const html = housePage(
       house({
         balances: [{ person: dani, cents: -900 }],
-        waiting: [{ to: ari, cents: 100 }],
-        toAnswer: [{ id: 1, from: dani, cents: 100 }],
+        history: [{ kind: "payment", id: 1, from: dani, to: rafi, cents: 100, toMe: true }],
       }),
     );
     expect(text(html)).not.toMatch(/\b(overdue|late|remind|reminder|urgent)\b/i);

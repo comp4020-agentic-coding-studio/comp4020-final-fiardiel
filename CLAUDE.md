@@ -4,8 +4,8 @@ These come from the argument in `README.md`. If a change would break one, stop a
 
 ## What the app must never do
 
-- **Count a payment the receiver hasn't confirmed.** "I paid Dina back" changes no balance until Dina confirms getting it. A payment Dina says never arrived is gone.
-- **Let anyone act for the person concerned.** Only the payer deletes their bill; only the receiver answers a payment.
+- **Let anyone but the receiver undo a payment.** A payment counts as soon as it is recorded, because the house trusts each other. Only the person it was paid to can say it never arrived; then it stops counting.
+- **Let anyone act for the person concerned.** Only the payer deletes their bill; only the receiver disputes a payment.
 - **Get the money wrong.** Amounts are whole cents everywhere. An equal split adds up to its total exactly. Balances are worked out from the bills and received payments every time, never stored.
 - **Nag or shame.** No notifications, reminders, "overdue", rankings of who owes most, or emphasis on debts. Balances are plain facts in name order. The app shows the state when someone looks.
 - **Require accounts or passwords.** A person is a name inside a house. The house code is the one shared secret.

@@ -108,12 +108,12 @@ function viewFor(store: Store, code: string, me: Person, draft?: Draft): HouseVi
       entry: { kind: "bill", id: b.id, paidBy: who(b.paidBy), note: b.note, shares, mine: b.paidBy === me.id },
     });
   }
-  // A payment the receiver said they didn't get is gone from the page.
+  // A payment the receiver said never arrived is gone from the page.
   for (const p of payments) {
     if (p.status === "rejected") continue;
     dated.push({
       at: p.at,
-      entry: { kind: "payment", from: who(p.fromId), to: who(p.toId), cents: p.cents, pending: p.status === "pending" },
+      entry: { kind: "payment", id: p.id, from: who(p.fromId), to: who(p.toId), cents: p.cents, toMe: p.toId === me.id },
     });
   }
   dated.sort((x, y) => y.at - x.at);
@@ -123,12 +123,6 @@ function viewFor(store: Store, code: string, me: Person, draft?: Draft): HouseVi
     me,
     people,
     balances: people.filter((p) => net.has(p.id)).map((p) => ({ person: p, cents: net.get(p.id) ?? 0 })),
-    toAnswer: payments
-      .filter((p) => p.status === "pending" && p.toId === me.id)
-      .map((p) => ({ id: p.id, from: who(p.fromId), cents: p.cents })),
-    waiting: payments
-      .filter((p) => p.status === "pending" && p.fromId === me.id)
-      .map((p) => ({ to: who(p.toId), cents: p.cents })),
     history: dated.map((d) => d.entry),
     draft,
   };
@@ -304,18 +298,15 @@ async function house(
     hub.broadcast(code);
     return redirect(res, `/h/${code}`);
   }
-  if (method === "POST" && action === "answer") {
-    const form = await readForm(req);
-    const answer = form.get("answer");
-    if (answer !== "received" && answer !== "rejected") throw new HttpError(400, "Choose got it or didn't get it.");
-    const id = idFrom(form.get("payment"));
-    const outcome = id === null ? "gone" : store.answerPayment(code, id, me.id, answer);
+  if (method === "POST" && action === "dispute") {
+    const id = idFrom((await readForm(req)).get("payment"));
+    const outcome = id === null ? "gone" : store.disputePayment(code, id, me.id);
     if (outcome === "gone") throw new HttpError(404, "That payment isn't in this house.");
-    if (outcome === "not_yours") throw new HttpError(403, "Only the person who was paid can answer this.");
-    // A second tap, or a second device, arrived after the first answer. Nothing
+    if (outcome === "not_yours") throw new HttpError(403, "Only the person who was paid can say it never arrived.");
+    // A second tap, or a second device, arrived after the first. Nothing
     // changes; the person sees the house as it now stands.
     if (outcome === "already") {
-      return sendHtml(res, 409, housePage({ ...viewFor(store, code, me), notice: "That payment was already answered." }));
+      return sendHtml(res, 409, housePage({ ...viewFor(store, code, me), notice: "That payment was already removed." }));
     }
     hub.broadcast(code);
     return redirect(res, `/h/${code}`);

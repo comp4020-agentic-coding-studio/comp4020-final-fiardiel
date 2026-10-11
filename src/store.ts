@@ -180,24 +180,21 @@ export class Store {
     if (fromId === toId || !Number.isInteger(cents) || cents <= 0 || cents > MAX_CENTS) return null;
     if (!this.inHouse(code, fromId) || !this.inHouse(code, toId)) return null;
     const result = this.db
-      .prepare("insert into payments (house_code, from_id, to_id, cents, created_at) values (?, ?, ?, ?, ?)")
+      .prepare("insert into payments (house_code, from_id, to_id, cents, status, created_at) values (?, ?, ?, ?, 'received', ?)")
       .run(code, fromId, toId, cents, this.now());
     return Number(result.lastInsertRowid);
   }
 
-  // Only the receiver answers, and only while the payment is pending. The check
-  // and the change are one statement, so of two answers at once exactly one lands.
-  answerPayment(
-    code: string,
-    paymentId: number,
-    requesterId: number,
-    answer: "received" | "rejected",
-  ): "done" | "not_yours" | "already" | "gone" {
+  // A payment counts as soon as it is recorded: the house trusts the payer.
+  // Only the receiver, who can see whether the money arrived, can say it never
+  // did, and then it stops counting. The check and the change are one
+  // statement, so of two taps at once exactly one lands.
+  disputePayment(code: string, paymentId: number, requesterId: number): "done" | "not_yours" | "already" | "gone" {
     const result = this.db
       .prepare(
-        "update payments set status = ?, resolved_at = ? where id = ? and house_code = ? and to_id = ? and status = 'pending'",
+        "update payments set status = 'rejected', resolved_at = ? where id = ? and house_code = ? and to_id = ? and status = 'received'",
       )
-      .run(answer, this.now(), paymentId, code, requesterId);
+      .run(this.now(), paymentId, code, requesterId);
     if (result.changes > 0) return "done";
     const row = this.db.prepare("select to_id from payments where id = ? and house_code = ?").get(paymentId, code) as
       | { to_id: number }

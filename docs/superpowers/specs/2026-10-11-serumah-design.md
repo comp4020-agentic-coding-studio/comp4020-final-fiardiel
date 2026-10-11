@@ -37,10 +37,12 @@ These are the author's decisions.
   person's amount themselves: worked out by hand, on a calculator, or with an
   AI. Nobody confirms their share. It is the same trust as the house code,
   where anyone with the code can act as anyone in the house.
-- **The receiver confirms payments.** "I paid Dina $15.50" stays pending until
-  Dina taps "got it" (or "didn't get it", which removes it). Whoever knows the
-  fact enters it: the payer knows what was bought, and the receiver knows
-  whether money arrived. This is the crit 9 decision (section 7).
+- **Payments count straight away; the receiver can undo one.** "I paid Dina
+  $15.50" counts as soon as it is recorded, on the same house trust as bills.
+  Only Dina, who can see whether the money arrived, can tap "Didn't get it",
+  which removes it. (Changed on 2026-10-11 from an earlier version where
+  payments waited for the receiver's "got it".) This is the crit 9 decision
+  (section 7).
 - **Balances are pairwise.** You only ever owe someone you shared a bill with.
   No debt simplification across the house, because it can tell you to pay
   someone you never shared anything with.
@@ -62,10 +64,10 @@ These are the author's decisions.
   one person in it.
 - The payer deletes their own bill (the way to fix a mistake: delete and
   re-enter).
-- Record a payment you made to someone; the receiver marks it received or not
-  received.
-- See your balances with each housemate, pending payments to and from you, and
-  the house's history of bills and payments, newest first.
+- Record a payment you made to someone; it counts at once. The receiver can
+  say it never arrived, which removes it.
+- See your balances with each housemate and the house's history of bills and
+  payments, newest first.
 - Every change above reaches every open page in that house within about a
   second, without a reload.
 
@@ -107,9 +109,10 @@ no "overdue". Swapping a turn waits for the other person to accept.
   A, plus the received payments A made to B. It is shown from the viewer's
   side as "You owe X $n", "X owes you $n", or nothing when it is zero.
 - A payment has an amount, a payer and a receiver, both in the house and not
-  the same person. Status is `pending`, `received` or `rejected`. Only
-  `received` payments count. Only the receiver can change the status, and only
-  while it is `pending`.
+  the same person. It is stored as `received` and counts at once. Only the
+  receiver can change it to `rejected` ("Didn't get it"), only once, and a
+  rejected payment no longer counts or shows. (`pending` remains in the schema
+  from the earlier design and is unused.)
 - A payment larger than the current balance is allowed (people round up, or
   pay ahead); the balance then flips direction.
 
@@ -120,14 +123,14 @@ no "overdue". Swapping a turn waits for the other person to accept.
 | Add a bill                     | Any housemate; they are the payer |
 | Delete a bill                  | Its payer                    |
 | Record a payment               | Any housemate; they are the payer |
-| Mark a payment received/not    | Its receiver, while pending  |
+| Dispute a payment              | Its receiver, once           |
 
 Anyone else gets a refusal, including a person from another house.
 
 ### Two people at once
 
 Each change is a single conditional SQLite write. A payment only moves to
-`received` or `rejected` if it is still `pending`; a bill is only deleted if
+`rejected` if it is still `received`; a bill is only deleted if
 it still exists and the requester is its payer. If two requests race, one
 applies and the other is told the state already changed and shown the current
 state. SQLite allows one writer at a time, so no change lands half-done.
@@ -171,9 +174,10 @@ framework, no new dependencies.
 
 ### `CLAUDE.md` rules (to confirm with the author)
 
-- **Never count a payment the receiver hasn't confirmed.**
+- **Only the receiver undoes a payment:** a payment counts at once; only the
+  person paid can say it never arrived.
 - **Only the person concerned acts:** the payer deletes their bill, the
-  receiver confirms a payment.
+  receiver disputes a payment.
 - **Never nag or shame:** no reminders, no "overdue", no ranking of debts, no
   emphasis on who owes. Balances are plain facts.
 - **Money always adds up:** amounts in integer cents, an equal split sums to
@@ -186,12 +190,12 @@ framework, no new dependencies.
 
 - Money (unit): an equal split sums to the total and puts remainders on the
   payer; parsing refuses negative, zero-total, over-precise and non-numeric
-  amounts; balances are pairwise; a pending or rejected payment changes no
-  balance and a received one does.
-- Permissions (against the running app): only the receiver can confirm or
-  reject a payment, only the payer can delete a bill, and a person from
+  amounts; balances are pairwise; a recorded payment changes the balance at
+  once and a disputed one no longer does.
+- Permissions (against the running app): only the receiver can dispute a
+  payment, only the payer can delete a bill, and a person from
   another house is refused on both and on the events stream.
-- Two at once: two simultaneous "got it" requests on one payment produce
+- Two at once: two simultaneous "Didn't get it" taps on one payment produce
   exactly one change.
 - Real time: a bill added by A arrives as an event on B's open stream within a
   second; a stream in another house receives nothing.
@@ -203,18 +207,19 @@ framework, no new dependencies.
 
 ## 7. The crit 9 decision
 
-Recorded by the author at `docs/decisions/0001-receiver-confirms-payments.md`.
-The facts it draws on:
+Recorded by the author in `docs/decisions/`. The facts it draws on:
 
 - **Context:** when several people use the app, which changes count straight
-  away and which wait for someone else to agree.
+  away, and who can undo them.
 - **Options considered:** (A) every person confirms their share of a bill
-  before it counts; (B) everything counts straight away and anyone can
-  dispute; (C) bills count straight away on the payer's word, payments wait
-  for the receiver. Also considered and set aside: each person claiming their
-  own items from a receipt (with first-come-first-served on the last unit).
-- **Chosen:** C, because whoever knows the fact enters it.
-- **Costs:** a payer can put a wrong amount on someone with nobody checking
-  (accepted as house trust, the same as the house code); a receiver who never
-  taps "got it" leaves the payer showing as owing; the live picture is quieter
-  than a version where everyone claims at once.
+  before it counts; (C) bills count on the payer's word but payments wait for
+  the receiver's "got it" (built first, then dropped); (B) everything counts
+  straight away and the receiver can say a payment never arrived. Also
+  considered and set aside: each person claiming their own items from a
+  receipt (first come, first served on the last unit).
+- **Chosen:** B, because the house trusts each other (the same reason there is
+  no login), and nobody should have to chase anybody, including chasing a
+  confirmation.
+- **Costs:** a mistaken payment clears a debt until the receiver notices and
+  taps "Didn't get it"; a payer can put a wrong amount on someone with nobody
+  checking; anyone with the house code can act as anyone.

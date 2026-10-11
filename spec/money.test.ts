@@ -84,57 +84,58 @@ describe("payments", () => {
     await addBill(house.code, house.cookies.Rafi, "", { [house.ids.Dina]: "15.50" });
     return house;
   }
+  const paymentId = (html: string): string => /action="\/h\/[A-Z0-9]+\/dispute"[\s\S]*?name="payment" value="(\d+)"/.exec(html)?.[1] ?? "";
 
-  it("changes nothing until the receiver says they got it", async () => {
+  it("counts a payment as soon as it is recorded, for both people", async () => {
     const { code, cookies, ids } = await owing();
     expect((await post(`/h/${code}/pay`, cookies.Dina, { to: ids.Rafi, amount: "15.50" })).status).toBe(303);
-    expect(balancesOf(await housePage(code, cookies.Dina))).toEqual(["You owe Rafi $15.50"]);
-    expect(textOf(await housePage(code, cookies.Dina))).toContain("You paid Rafi $15.50");
-
-    const rafiPage = await housePage(code, cookies.Rafi);
-    expect(textOf(rafiPage)).toContain("Dina says they paid you $15.50");
-    expect((await press(rafiPage, "Got it", cookies.Rafi)).status).toBe(303);
     expect(textOf(await housePage(code, cookies.Dina))).toContain("Nobody owes anybody.");
+    expect(textOf(await housePage(code, cookies.Rafi))).toContain("Nobody owes anybody.");
     expect(historyOf(await housePage(code, cookies.Dina))[0]).toBe("Dina paid Rafi $15.50");
   });
 
-  it("drops a payment the receiver says they didn't get", async () => {
+  it("brings the debt back when the receiver says the money never arrived", async () => {
     const { code, cookies, ids } = await owing();
     await post(`/h/${code}/pay`, cookies.Dina, { to: ids.Rafi, amount: "15.50" });
-    await press(await housePage(code, cookies.Rafi), "Didn't get it", cookies.Rafi);
+    const rafiPage = await housePage(code, cookies.Rafi);
+    expect(historyOf(rafiPage)[0]).toContain("Dina paid Rafi $15.50");
+    expect((await press(rafiPage, "Didn't get it", cookies.Rafi)).status).toBe(303);
     const dina = await housePage(code, cookies.Dina);
     expect(balancesOf(dina)).toEqual(["You owe Rafi $15.50"]);
     expect(historyOf(dina).some((line) => line.startsWith("Dina paid Rafi"))).toBe(false);
   });
 
-  it("lets only the receiver answer, and only once, even when two answers race", async () => {
+  it("lets only the receiver dispute, and only once, even when two taps race", async () => {
     const { code, cookies, ids } = await owing();
     await post(`/h/${code}/pay`, cookies.Dina, { to: ids.Rafi, amount: "15.50" });
-    const id = /name="payment" value="(\d+)"/.exec(await housePage(code, cookies.Rafi))?.[1] ?? "";
-    expect((await post(`/h/${code}/answer`, cookies.Dina, { payment: id, answer: "received" })).status).toBe(403);
+    const id = paymentId(await housePage(code, cookies.Rafi));
+    expect(id).not.toBe("");
+    expect(paymentId(await housePage(code, cookies.Dina))).toBe("");
+    expect((await post(`/h/${code}/dispute`, cookies.Dina, { payment: id })).status).toBe(403);
 
-    const answers = await Promise.all([
-      post(`/h/${code}/answer`, cookies.Rafi, { payment: id, answer: "received" }),
-      post(`/h/${code}/answer`, cookies.Rafi, { payment: id, answer: "rejected" }),
+    const taps = await Promise.all([
+      post(`/h/${code}/dispute`, cookies.Rafi, { payment: id }),
+      post(`/h/${code}/dispute`, cookies.Rafi, { payment: id }),
     ]);
-    expect(answers.map((r) => r.status).sort()).toEqual([303, 409]);
-    // The slower tap counted nothing, but the person is shown how things now stand.
-    const late = await answers.find((r) => r.status === 409)!.text();
-    expect(textOf(late)).toContain("already answered");
-    expect(textOf(late)).toContain("Nobody owes anybody.");
+    expect(taps.map((r) => r.status).sort()).toEqual([303, 409]);
+    // The slower tap changed nothing, but the person is shown how things now stand.
+    const late = await taps.find((r) => r.status === 409)!.text();
+    expect(textOf(late)).toContain("already removed");
+    expect(balancesOf(late)).toEqual(["Dina owes you $15.50"]);
   });
 
-  it("does not let another house answer or see a payment", async () => {
+  it("does not let another house dispute a payment", async () => {
     const { code, cookies, ids } = await owing();
     await post(`/h/${code}/pay`, cookies.Dina, { to: ids.Rafi, amount: "15.50" });
-    const id = /name="payment" value="(\d+)"/.exec(await housePage(code, cookies.Rafi))?.[1] ?? "";
+    const id = paymentId(await housePage(code, cookies.Rafi));
     const other = await newHouse();
     const zed = await joinAs(other, "Zed");
-    expect((await post(`/h/${other}/answer`, zed, { payment: id, answer: "received" })).status).toBe(404);
+    expect((await post(`/h/${other}/dispute`, zed, { payment: id })).status).toBe(404);
     const forged = cookies.Rafi.replace(`person_${code}`, `person_${other}`);
-    const res = await post(`/h/${other}/answer`, forged, { payment: id, answer: "received" });
+    const res = await post(`/h/${other}/dispute`, forged, { payment: id });
     expect(res.status).toBe(303);
     expect(res.headers.get("location")).toBe(`/h/${other}/join`);
+    expect(textOf(await housePage(code, cookies.Rafi))).toContain("Nobody owes anybody.");
   });
 
   it("refuses paying yourself, someone outside the house, or a bad amount", async () => {

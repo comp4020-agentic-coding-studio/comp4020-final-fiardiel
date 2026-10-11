@@ -1,10 +1,12 @@
 import { readFileSync } from "node:fs";
 import type { IncomingMessage, ServerResponse } from "node:http";
-import { NAME_MAX } from "./names.ts";
-import { handoffPage, homePage, joinPage, kitchenPage, messagePage } from "./pages.ts";
-import type { KitchenView } from "./pages.ts";
+import type { Hub } from "./live.ts";
+import { balancesFor, equalSplit, parseCents, plainCents } from "./money.ts";
+import type { Share } from "./money.ts";
+import { NAME_MAX, NOTE_MAX, normaliseNote } from "./names.ts";
+import { homePage, housePage, joinPage, messagePage } from "./pages.ts";
+import type { Draft, Entry, HouseView } from "./pages.ts";
 import { renderReadmePage } from "./readme.ts";
-import { cookingNow, kitchenState, lastCooked, responsible } from "./rules.ts";
 import type { Person, Store } from "./store.ts";
 
 const README = new URL("../README.md", import.meta.url);
@@ -87,26 +89,61 @@ function cookieFor(req: IncomingMessage, code: string, token: string): string {
   return `${cookieName(code)}=${token}; Path=/; HttpOnly; SameSite=Lax; Max-Age=31536000${secure}`;
 }
 
-function viewFor(store: Store, code: string, me: Person): KitchenView {
-  const history = store.history(code);
-  const people = new Map<number, Person>(store.people(code).map((p) => [p.id, p] as const));
-  const named = (id: number | null): Person | null => (id === null ? null : (people.get(id) ?? null));
-  const cooking = cookingNow(history.sessions);
+function viewFor(store: Store, code: string, me: Person, draft?: Draft): HouseView {
+  const people = store.people(code);
+  const byId = new Map<number, Person>(people.map((p) => [p.id, p] as const));
+  const order = new Map<number, number>(people.map((p, i) => [p.id, i] as const));
+  const who = (id: number): Person => byId.get(id) ?? { id, name: "someone" };
+  const bills = store.bills(code);
+  const payments = store.payments(code);
+  const net = balancesFor(me.id, bills, payments);
+
+  const dated: { at: number; entry: Entry }[] = [];
+  for (const b of bills) {
+    const shares = [...b.shares]
+      .sort((x, y) => (order.get(x.personId) ?? 0) - (order.get(y.personId) ?? 0))
+      .map((s) => ({ person: who(s.personId), cents: s.cents }));
+    dated.push({
+      at: b.at,
+      entry: { kind: "bill", id: b.id, paidBy: who(b.paidBy), note: b.note, shares, mine: b.paidBy === me.id },
+    });
+  }
+  // A payment the receiver said they didn't get is gone from the page.
+  for (const p of payments) {
+    if (p.status === "rejected") continue;
+    dated.push({
+      at: p.at,
+      entry: { kind: "payment", from: who(p.fromId), to: who(p.toId), cents: p.cents, pending: p.status === "pending" },
+    });
+  }
+  dated.sort((x, y) => y.at - x.at);
+
   return {
     code,
     me,
-    cooking: cooking.map((id) => people.get(id)).filter((p): p is Person => p !== undefined),
-    state: kitchenState(history.marks),
-    responsible: named(responsible(history.sessions, history.marks)),
-    lastCooked: named(lastCooked(history.sessions)),
-    iAmCooking: cooking.includes(me.id),
+    people,
+    balances: people.filter((p) => net.has(p.id)).map((p) => ({ person: p, cents: net.get(p.id) ?? 0 })),
+    toAnswer: payments
+      .filter((p) => p.status === "pending" && p.toId === me.id)
+      .map((p) => ({ id: p.id, from: who(p.fromId), cents: p.cents })),
+    waiting: payments
+      .filter((p) => p.status === "pending" && p.fromId === me.id)
+      .map((p) => ({ to: who(p.toId), cents: p.cents })),
+    history: dated.map((d) => d.entry),
+    draft,
   };
 }
 
-export function createHandler(store: Store) {
+// A whole number id from a form field, or null.
+function idFrom(raw: string | null): number | null {
+  const id = Number(raw ?? "");
+  return raw !== null && raw.trim() !== "" && Number.isInteger(id) && id > 0 ? id : null;
+}
+
+export function createHandler(store: Store, hub: Hub) {
   return async (req: IncomingMessage, res: ServerResponse): Promise<void> => {
     try {
-      await route(store, req, res);
+      await route(store, hub, req, res);
     } catch (error) {
       if (res.headersSent) {
         // A response has already started; a second one cannot be written.
@@ -125,7 +162,7 @@ export function createHandler(store: Store) {
   };
 }
 
-async function route(store: Store, req: IncomingMessage, res: ServerResponse): Promise<void> {
+async function route(store: Store, hub: Hub, req: IncomingMessage, res: ServerResponse): Promise<void> {
   // Node leaves the body off a HEAD response, so HEAD is routed as GET.
   const method = req.method === "HEAD" ? "GET" : (req.method ?? "GET");
   const url = parseUrl(req.url);
@@ -155,11 +192,12 @@ async function route(store: Store, req: IncomingMessage, res: ServerResponse): P
   if (!CODE_RE.test(code) || !store.houseExists(code)) {
     return sendHtml(res, 404, messagePage("No such house", NO_SUCH_HOUSE));
   }
-  return house(store, req, res, code, method, action);
+  return house(store, hub, req, res, code, method, action);
 }
 
 async function house(
   store: Store,
+  hub: Hub,
   req: IncomingMessage,
   res: ServerResponse,
   code: string,
@@ -192,36 +230,80 @@ async function house(
   if (me === null) return redirect(res, `/h/${code}/join`);
 
   if (method === "GET" && action === "") {
-    return sendHtml(res, 200, kitchenPage(viewFor(store, code, me)));
+    return sendHtml(res, 200, housePage(viewFor(store, code, me)));
   }
-  if (method === "GET" && action === "handoff") {
-    return sendHtml(res, 200, handoffPage(code));
-  }
-  if (method === "POST" && action === "cook") {
+  if (method === "POST" && action === "bill") {
     const form = await readForm(req);
-    const choice = form.get("action");
-    if (choice === "start") {
-      store.startCooking(code, me.id);
-      return redirect(res, `/h/${code}`);
+    const people = store.people(code);
+    const draft: Draft = {
+      note: form.get("note") ?? "",
+      total: form.get("total") ?? "",
+      amounts: Object.fromEntries(people.map((p) => [p.id, form.get(`amount_${p.id}`) ?? ""] as const)),
+      ticked: people.filter((p) => form.has(`with_${p.id}`)).map((p) => p.id),
+    };
+    const again = (message: string): void =>
+      sendHtml(res, 400, housePage(viewFor(store, code, me, { ...draft, message })));
+    const note = normaliseNote(draft.note);
+    if (note === null) return again(`Keep the note to ${NOTE_MAX} characters, without control characters.`);
+
+    if (form.get("intent") === "fill") {
+      const total = parseCents(draft.total);
+      if (total === null || total === 0) return again("Type the total in dollars, like 18.50.");
+      if (draft.ticked.length === 0) return again("Tick who shares it.");
+      const split = new Map(equalSplit(total, draft.ticked, me.id).map((s) => [s.personId, s.cents] as const));
+      for (const p of people) {
+        const cents = split.get(p.id);
+        draft.amounts[p.id] = cents === undefined ? "" : plainCents(cents);
+      }
+      return sendHtml(res, 200, housePage(viewFor(store, code, me, draft)));
     }
-    if (choice === "stop") {
-      store.stopCooking(code, me.id);
-      return redirect(res, `/h/${code}/handoff`);
+
+    // People who joined after the form was drawn have no box, so only the
+    // house's people are read, and an id from anywhere else is ignored.
+    const shares: Share[] = [];
+    for (const p of people) {
+      const raw = (draft.amounts[p.id] ?? "").trim();
+      if (raw === "") continue;
+      const cents = parseCents(raw);
+      if (cents === null) return again(`${p.name}'s amount doesn't look like dollars. Use a number like 4.50.`);
+      if (cents > 0) shares.push({ personId: p.id, cents });
     }
-    if (choice === "end") {
-      // Anyone in the house can end a session someone forgot. Only that
-      // person's open session in this house can end, so a stray id ends nothing.
-      const id = Number(form.get("person") ?? "");
-      if (!Number.isInteger(id) || id <= 0) throw new HttpError(400, "That person isn't in this house.");
-      store.stopCooking(code, id);
-      return redirect(res, `/h/${code}`);
-    }
-    throw new HttpError(400, "Choose start, stop or end.");
+    if (shares.length === 0) return again("Put an amount next to at least one person.");
+    if (store.addBill(code, me.id, note, shares) === null) throw new HttpError(400, "That bill couldn't be added.");
+    hub.broadcast(code);
+    return redirect(res, `/h/${code}`);
   }
-  if (method === "POST" && action === "mark") {
-    const state = (await readForm(req)).get("state");
-    if (state !== "clean" && state !== "messy") throw new HttpError(400, "Choose clean or messy.");
-    store.mark(code, me.id, state);
+  if (method === "POST" && action === "delete") {
+    const id = idFrom((await readForm(req)).get("bill"));
+    const outcome = id === null ? "gone" : store.deleteBill(code, id, me.id);
+    if (outcome === "gone") throw new HttpError(404, "That bill isn't here any more.");
+    if (outcome === "not_yours") throw new HttpError(403, "Only the person who paid can delete a bill.");
+    hub.broadcast(code);
+    return redirect(res, `/h/${code}`);
+  }
+  if (method === "POST" && action === "pay") {
+    const form = await readForm(req);
+    const cents = parseCents(form.get("amount") ?? "");
+    if (cents === null || cents === 0) throw new HttpError(400, "Type the amount in dollars, like 15.50.");
+    const to = idFrom(form.get("to"));
+    if (to === null || store.recordPayment(code, me.id, to, cents) === null) {
+      throw new HttpError(400, "Pick someone else in this house.");
+    }
+    hub.broadcast(code);
+    return redirect(res, `/h/${code}`);
+  }
+  if (method === "POST" && action === "answer") {
+    const form = await readForm(req);
+    const answer = form.get("answer");
+    if (answer !== "received" && answer !== "rejected") throw new HttpError(400, "Choose got it or didn't get it.");
+    const id = idFrom(form.get("payment"));
+    const outcome = id === null ? "gone" : store.answerPayment(code, id, me.id, answer);
+    if (outcome === "gone") throw new HttpError(404, "That payment isn't in this house.");
+    if (outcome === "not_yours") throw new HttpError(403, "Only the person who was paid can answer this.");
+    if (outcome === "already") {
+      throw new HttpError(409, "That payment was already answered. Go back to your house to see how things stand.");
+    }
+    hub.broadcast(code);
     return redirect(res, `/h/${code}`);
   }
   return notFound(res);

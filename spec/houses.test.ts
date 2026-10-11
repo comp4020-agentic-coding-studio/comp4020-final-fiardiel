@@ -1,6 +1,6 @@
 import { JSDOM } from "jsdom";
 import { describe, expect, it } from "vitest";
-import { buttonsOf, cookieOf, cookingListOf, joinAs, kitchen, newHouse, personIdOf, post, send, textOf } from "./helpers.ts";
+import { addBill, buttonsOf, cookieOf, historyOf, housePage, joinAs, newHouse, personIdOf, post, send, textOf } from "./helpers.ts";
 
 const link = (html: string, href: string): Element | null =>
   new JSDOM(html).window.document.querySelector(`a[href="${href}"]`);
@@ -89,19 +89,22 @@ describe("being someone in a house", () => {
     expect(res.headers.get("location")).toBe(`/h/${code}/join`);
   });
 
-  it("lets you join with a name and see the kitchen as that person", async () => {
+  it("lets you join with a name and see the house as that person", async () => {
     const code = await newHouse();
     const cookie = await joinAs(code, "Dani");
-    expect(textOf(await kitchen(code, cookie))).toContain("you are Dani");
+    expect(textOf(await housePage(code, cookie))).toContain("you are Dani");
   });
 
   it("finds you, and the house as you left it, on a later visit", async () => {
     const code = await newHouse();
     const cookie = await joinAs(code, "Dani");
-    expect((await post(`/h/${code}/cook`, cookie, { action: "start" })).status).toBe(303);
-    const later = await kitchen(code, cookie);
+    const id = await personIdOf(code, "Dani");
+    expect((await addBill(code, cookie, "Rice", { [id]: "5" })).status).toBe(303);
+    const later = await housePage(code, cookie);
     expect(textOf(later)).toContain("you are Dani");
-    expect(cookingListOf(later)).toEqual(["Dani"]);
+    // The line ends with Dani's own "Delete" button, hence toContain.
+    expect(historyOf(later)).toHaveLength(1);
+    expect(historyOf(later)[0]).toContain("Dani paid $5.00 for Rice: Dani $5.00");
   });
 
   it("recognises a returning person on the join page, but not a stranger", async () => {
@@ -176,7 +179,7 @@ describe("being someone in a house", () => {
     await joinAs(code, "Dani");
     const claim = await send(`/h/${code}/claim`, { form: { person: await personIdOf(code, "Dani") } });
     expect(claim.status).toBe(303);
-    expect(textOf(await kitchen(code, cookieOf(claim)))).toContain("you are Dani");
+    expect(textOf(await housePage(code, cookieOf(claim)))).toContain("you are Dani");
   });
 
   it("rejects a claim for a person who is not in this house", async () => {
@@ -223,12 +226,12 @@ describe("being someone in a house", () => {
     expect(res.headers.get("location")).toBe(`/h/${code}/join`);
   });
 
-  it("shows a name containing markup as text, on the join and kitchen pages", async () => {
+  it("shows a name containing markup as text, on the join and house pages", async () => {
     const code = await newHouse();
     const cookie = await joinAs(code, `<b>x</b> Da"ni'`);
-    const kitchenHtml = await kitchen(code, cookie);
-    expect(kitchenHtml).not.toContain("<b>x</b>");
-    expect(textOf(kitchenHtml)).toContain(`<b>x</b> Da"ni'`);
+    const houseHtml = await housePage(code, cookie);
+    expect(houseHtml).not.toContain("<b>x</b>");
+    expect(textOf(houseHtml)).toContain(`<b>x</b> Da"ni'`);
     const joinHtml = await (await send(`/h/${code}/join`)).text();
     expect(joinHtml).not.toContain("<b>x</b>");
     expect(buttonsOf(joinHtml)).toContain(`<b>x</b> Da"ni'`);
@@ -238,7 +241,7 @@ describe("being someone in a house", () => {
     const a = await newHouse();
     const b = await newHouse();
     const cookie = await joinAs(a, "Dani");
-    const res = await post(`/h/${b}/cook`, cookie, { action: "start" });
+    const res = await post(`/h/${b}/bill`, cookie, { note: "x", intent: "add" });
     expect(res.status).toBe(303);
     expect(res.headers.get("location")).toBe(`/h/${b}/join`);
   });

@@ -41,8 +41,10 @@ const parse = (html: string): Document => new JSDOM(html).window.document;
 export const textOf = (html: string): string => parse(html).body.textContent ?? "";
 export const buttonsOf = (html: string): string[] =>
   [...parse(html).querySelectorAll("button")].map((b) => b.textContent ?? "");
-export const cookingListOf = (html: string): string[] =>
-  [...parse(html).querySelectorAll("li .name")].map((n) => n.textContent ?? "");
+const lines = (html: string, selector: string): string[] =>
+  [...parse(html).querySelectorAll(selector)].map((n) => (n.textContent ?? "").replace(/\s+/g, " ").trim());
+export const balancesOf = (html: string): string[] => lines(html, "#balances li");
+export const historyOf = (html: string): string[] => lines(html, "#history li");
 
 export async function newHouse(): Promise<string> {
   const res = await send("/houses", { method: "POST" });
@@ -57,9 +59,9 @@ export async function joinAs(code: string, name: string): Promise<string> {
   return cookieOf(res);
 }
 
-export async function kitchen(code: string, cookie: string): Promise<string> {
+export async function housePage(code: string, cookie: string): Promise<string> {
   const res = await send(`/h/${code}`, { cookie });
-  if (res.status !== 200) throw new Error(`the kitchen page gave ${res.status}`);
+  if (res.status !== 200) throw new Error(`the house page gave ${res.status}`);
   return res.text();
 }
 
@@ -86,4 +88,23 @@ export async function personIdOf(code: string, name: string): Promise<string> {
     if (id !== undefined && form.querySelector("button")?.textContent === name) return id;
   }
   throw new Error(`${name} is not listed on the join page of ${code}`);
+}
+
+// Amounts are keyed by person id, as typed into the boxes.
+export function addBill(code: string, cookie: string, note: string, amounts: Record<string, string>): Promise<Response> {
+  const form: Form = { note, intent: "add" };
+  for (const [id, amount] of Object.entries(amounts)) form[`amount_${id}`] = amount;
+  return post(`/h/${code}/bill`, cookie, form);
+}
+
+// A house with these people in it: their cookies and ids by name.
+export async function setUpHouse(...names: string[]) {
+  const code = await newHouse();
+  const cookies: Record<string, string> = {};
+  const ids: Record<string, string> = {};
+  for (const name of names) {
+    cookies[name] = await joinAs(code, name);
+    ids[name] = await personIdOf(code, name);
+  }
+  return { code, cookies, ids };
 }

@@ -23,5 +23,5 @@ A was ruled out for the same reason: it would be annoying for everyone to accept
 ## Consequences
 
 - Nobody waits and nobody chases, which is what good means for this app.
-- If someone records a payment by mistake, the debt disappears until the person who was paid notices and taps "Didn't get it". Mistakes are rare in our house, and the payment shows up straight away in the receiver's history, so they can see it. Even if one slips through, it is written down where anyone can check, which is better than a message buried in the group chat.
+- If someone records a payment by mistake, the debt disappears until the person who was paid notices and taps "Didn't get it". Mistakes are rare in our house, and the payment shows up straight away in the receiver's history, so they can see it. Even if one slips through, it is written down where the people involved can check, which is better than a message buried in the group chat.
 - The payer can also put a wrong amount on someone with nobody checking. This is the same trust as the house code, where anyone with the code can act as anyone in the house.

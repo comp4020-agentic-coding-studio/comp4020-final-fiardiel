@@ -91,7 +91,7 @@ describe("house page", () => {
     );
     const rows = [...doc(html).querySelectorAll("#balances li")];
     expect(rows.map((r) => r.querySelector(".amount")?.textContent)).toEqual(["$1.00", "$9.00"]);
-    // Owing and being owed look the same: no class marks one side.
+    // Both sides use the same row: only the card's colour differs, never size or weight.
     expect(rows.map((r) => r.className)).toEqual(["", ""]);
   });
 
@@ -99,19 +99,37 @@ describe("house page", () => {
     expect(text(housePage(house()))).toContain("Nobody owes anybody.");
   });
 
-  it("lets you say a payment to you never arrived, from the history, and only payments to you", () => {
+  // Each history row read as its parts: what it was for, the total, who paid,
+  // and the share chips with the side of the money each one is on.
+  const entries = (html: string) =>
+    [...doc(html).querySelectorAll("#history > li")].map((li) => {
+      const t = (sel: string) => (li.querySelector(sel)?.textContent ?? "").replace(/\s+/g, " ").trim();
+      return {
+        pill: t(".pill"),
+        what: t(".what"),
+        total: t(".total"),
+        by: t(".by"),
+        chips: [...li.querySelectorAll(".chip")].map((c) => `${(c.textContent ?? "").trim()}${c.classList.contains("owe") ? " (owe)" : c.classList.contains("owed") ? " (owed)" : ""}`),
+      };
+    });
+
+  it("lets you say a payment to you never arrived, with a real button, only on payments to you", () => {
     const html = housePage(
       house({
         history: [
           { kind: "payment", id: 7, from: dani, to: rafi, cents: 1550, toMe: true },
-          { kind: "payment", id: 8, from: dani, to: ari, cents: 500, toMe: false },
+          { kind: "payment", id: 8, from: rafi, to: ari, cents: 500, toMe: false },
         ],
       }),
     );
-    expect(items(html, "#payments li")[0]).toContain("Dani paid Rafi $15.50");
+    expect(entries(html).map((e) => [e.pill, e.what, e.total])).toEqual([
+      ["paid", "Dani paid you", "$15.50"],
+      ["paid", "You paid Ari", "$5.00"],
+    ]);
     const forms = [...doc(html).querySelectorAll('form[action="/h/ABC234/dispute"]')];
     expect(forms.map((f) => f.querySelector<HTMLInputElement>('input[name="payment"]')!.value)).toEqual(["7"]);
     expect(forms[0].textContent).toBe("Didn't get it");
+    expect(forms[0].querySelector("button svg")).not.toBeNull();
   });
 
   it("asks nobody to confirm anything", () => {
@@ -120,12 +138,12 @@ describe("house page", () => {
     expect(doc(html).querySelector("main")!.textContent).not.toMatch(/confirm|waiting|did you get/i);
   });
 
-  it("lists bills and payments apart, with delete only on your own bills", () => {
+  it("shows bills and payments in one list, newest first, as short receipts", () => {
     const html = housePage(
       house({
         history: [
-          { kind: "payment", id: 9, from: dani, to: ari, cents: 500, toMe: false },
-          { kind: "bill", id: 2, paidBy: dani, note: "", shares: [{ person: rafi, cents: 300 }], mine: false },
+          { kind: "payment", id: 9, from: dani, to: rafi, cents: 500, toMe: true },
+          { kind: "bill", id: 2, paidBy: dani, note: "", shares: [{ person: rafi, cents: 300 }, { person: dani, cents: 300 }], mine: false },
           {
             kind: "bill",
             id: 1,
@@ -134,19 +152,23 @@ describe("house page", () => {
             shares: [
               { person: ari, cents: 900 },
               { person: dani, cents: 450 },
+              { person: rafi, cents: 450 },
             ],
             mine: true,
           },
         ],
       }),
     );
-    expect(items(html, "#payments li")).toEqual(["Dani paid Ari $5.00"]);
-    const bills = items(html, "#bills li");
-    expect(bills[0]).toContain("Dani paid $3.00 for a bill: Rafi $3.00");
-    expect(bills[1]).toContain("Rafi paid $13.50 for Woolies: Ari $9.00, Dani $4.50");
+    expect(entries(html)).toEqual([
+      { pill: "paid", what: "Dani paid you", total: "$5.00", by: "", chips: [] },
+      { pill: "bill", what: "Bill", total: "$6.00", by: "Dani paid", chips: ["You $3.00 (owe)", "Dani $3.00"] },
+      { pill: "bill", what: "Woolies", total: "$18.00", by: "You paid", chips: ["Ari $9.00 (owed)", "Dani $4.50 (owed)", "You $4.50"] },
+    ]);
     const deletes = [...doc(html).querySelectorAll('form[action="/h/ABC234/delete"]')];
     expect(deletes.map((f) => f.querySelector<HTMLInputElement>('input[name="bill"]')!.value)).toEqual(["1"]);
+    expect(deletes[0].querySelector("button svg")).not.toBeNull();
   });
+
 
   it("shows names and notes as text, never as markup", () => {
     const evil = { id: 4, name: "<b>x</b>" };

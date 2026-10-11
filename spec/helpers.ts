@@ -44,9 +44,19 @@ export const buttonsOf = (html: string): string[] =>
 const lines = (html: string, selector: string): string[] =>
   [...parse(html).querySelectorAll(selector)].map((n) => (n.textContent ?? "").replace(/\s+/g, " ").trim());
 export const balancesOf = (html: string): string[] => lines(html, "#balances li");
-export const historyOf = (html: string): string[] => lines(html, "#history li");
-export const billsOf = (html: string): string[] => lines(html, "#bills li");
-export const paymentsOf = (html: string): string[] => lines(html, "#payments li");
+// Each history row as its parts: the pill ("bill" or "paid"), what it was
+// for, the total, who paid, and the share chips.
+export const historyOf = (html: string) =>
+  [...parse(html).querySelectorAll("#history > li")].map((li) => {
+    const t = (sel: string) => (li.querySelector(sel)?.textContent ?? "").replace(/\s+/g, " ").trim();
+    return {
+      pill: t(".pill"),
+      what: t(".what"),
+      total: t(".total"),
+      by: t(".by"),
+      chips: [...li.querySelectorAll(".chip")].map((c) => (c.textContent ?? "").replace(/\s+/g, " ").trim()),
+    };
+  });
 
 export async function newHouse(): Promise<string> {
   const res = await send("/houses", { method: "POST" });

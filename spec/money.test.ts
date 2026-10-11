@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { addBill, balancesOf, historyOf, housePage, paymentsOf, joinAs, newHouse, post, press, send, setUpHouse, textOf } from "./helpers.ts";
+import { addBill, balancesOf, historyOf, housePage, joinAs, newHouse, post, press, send, setUpHouse, textOf } from "./helpers.ts";
 
 describe("bills", () => {
   it("puts the amounts the payer typed on each person", async () => {
@@ -60,7 +60,7 @@ describe("bills", () => {
     await addBill(code, cookies.Rafi, "<img src=x onerror=alert(1)>", { [ids.Dina]: "1" });
     const html = await housePage(code, cookies.Dina);
     expect(html).not.toContain("<img src=x");
-    expect(historyOf(html)[0]).toContain("<img src=x onerror=alert(1)>");
+    expect(historyOf(html)[0].what).toBe("<img src=x onerror=alert(1)>");
   });
 
   it("lets only the payer delete a bill", async () => {
@@ -91,18 +91,18 @@ describe("payments", () => {
     expect((await post(`/h/${code}/pay`, cookies.Dina, { to: ids.Rafi, amount: "15.50" })).status).toBe(303);
     expect(textOf(await housePage(code, cookies.Dina))).toContain("Nobody owes anybody.");
     expect(textOf(await housePage(code, cookies.Rafi))).toContain("Nobody owes anybody.");
-    expect(paymentsOf(await housePage(code, cookies.Dina))).toEqual(["Dina paid Rafi $15.50"]);
+    expect(historyOf(await housePage(code, cookies.Dina))[0]).toMatchObject({ pill: "paid", what: "You paid Rafi", total: "$15.50" });
   });
 
   it("brings the debt back when the receiver says the money never arrived", async () => {
     const { code, cookies, ids } = await owing();
     await post(`/h/${code}/pay`, cookies.Dina, { to: ids.Rafi, amount: "15.50" });
     const rafiPage = await housePage(code, cookies.Rafi);
-    expect(paymentsOf(rafiPage)[0]).toContain("Dina paid Rafi $15.50");
+    expect(historyOf(rafiPage)[0]).toMatchObject({ what: "Dina paid you", total: "$15.50" });
     expect((await press(rafiPage, "Didn't get it", cookies.Rafi)).status).toBe(303);
     const dina = await housePage(code, cookies.Dina);
     expect(balancesOf(dina)).toEqual(["You owe Rafi $15.50"]);
-    expect(historyOf(dina).some((line) => line.startsWith("Dina paid Rafi"))).toBe(false);
+    expect(historyOf(dina).some((e) => e.pill === "paid")).toBe(false);
   });
 
   it("lets only the receiver dispute, and only once, even when two taps race", async () => {
@@ -149,6 +149,19 @@ describe("payments", () => {
     ]) {
       expect((await post(`/h/${code}/pay`, cookies.Dina, form)).status, JSON.stringify(form)).toBe(400);
     }
+  });
+});
+
+describe("history", () => {
+  it("shows each person only the bills and payments that involve them", async () => {
+    const { code, cookies, ids } = await setUpHouse("Rafi", "Dina", "Ari");
+    await addBill(code, cookies.Dina, "Boba", { [ids.Ari]: "8", [ids.Dina]: "8" });
+    await post(`/h/${code}/pay`, cookies.Ari, { to: ids.Dina, amount: "8" });
+    await addBill(code, cookies.Rafi, "Coles", { [ids.Dina]: "10" });
+
+    expect(historyOf(await housePage(code, cookies.Rafi)).map((e) => e.what)).toEqual(["Coles"]);
+    expect(historyOf(await housePage(code, cookies.Ari)).map((e) => e.what)).toEqual(["You paid Dina", "Boba"]);
+    expect(historyOf(await housePage(code, cookies.Dina)).map((e) => e.what)).toEqual(["Coles", "Ari paid you", "Boba"]);
   });
 });
 

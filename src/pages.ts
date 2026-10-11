@@ -33,21 +33,24 @@ export function esc(text: string): string {
   return text.replace(/[&<>"']/g, (c) => ESCAPES[c]);
 }
 
-// Ink-blue notebook: warm paper, a serif title, rounded cards, ink blue with
-// terracotta as a second colour. Balances are large so they read at arm's
-// length. What you owe and what you're owed sit in separate cards but look
-// the same: one colour, no red, nothing that marks a debtor. Each housemate
-// has a coloured initial only so people can be told apart at a glance.
+// Ink-blue notebook: warm paper, a serif title, rounded cards. Colour means one
+// thing only, the direction of money: ink blue for what you're owed,
+// terracotta for what you owe. Both sides have the same size and weight, and
+// neither is red or green, so nobody is marked. Pills and buttons stay
+// neutral. Each housemate has a coloured initial so people are easy to tell
+// apart at a glance.
 const STYLE = `
   :root {
     color-scheme: light dark;
     --paper: #f8f6f2; --card: #ffffff; --ink: #1f2430; --muted: #6f7684;
-    --rule: #e6e3dd; --accent: #2f4fa2; --accent-2: #c8734a; --strip: #e6ebf7; --on-accent: #ffffff;
+    --rule: #e6e3dd; --accent: #2f4fa2; --on-accent: #ffffff; --pill: #eceae5;
+    --owed: #2f4fa2; --owe: #b8643e; --strip-owed: #e6ebf7; --strip-owe: #f8e9e1;
   }
   @media (prefers-color-scheme: dark) {
     :root {
       --paper: #13161f; --card: #1d2230; --ink: #e8ebf5; --muted: #9aa2b5;
-      --rule: #2c3346; --accent: #8aa6ff; --accent-2: #ef9a70; --strip: #1d2847; --on-accent: #13161f;
+      --rule: #2c3346; --accent: #8aa6ff; --on-accent: #13161f; --pill: #2a3142;
+      --owed: #8aa6ff; --owe: #ef9a70; --strip-owed: #1d2847; --strip-owe: #3a2620;
     }
   }
   * { box-sizing: border-box; }
@@ -55,7 +58,7 @@ const STYLE = `
   body { margin: 0; background: var(--paper); color: var(--ink); font: 1rem/1.5 system-ui, -apple-system, "Segoe UI", sans-serif; }
   main { max-width: 32rem; margin: 0 auto; padding: 1.25rem 1rem 2.5rem; }
   h1 { font: 700 2rem/1.15 Georgia, "Times New Roman", serif; margin: 0.25rem 0 0.75rem; }
-  h2 { font-size: 0.75rem; font-weight: 700; letter-spacing: 0.08em; text-transform: uppercase; color: var(--muted); margin: 1.5rem 0 0.5rem; }
+  h2 { font-size: 0.95rem; font-weight: 650; margin: 1.5rem 0 0.5rem; }
   a { color: var(--accent); }
   .quiet { color: var(--muted); font-size: 0.875rem; }
   .sr { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
@@ -65,28 +68,49 @@ const STYLE = `
   .top { display: flex; flex-wrap: wrap; justify-content: space-between; align-items: baseline; column-gap: 1rem; }
   .top p { margin: 0 0 0.75rem; }
 
-  #totals { display: flex; justify-content: space-between; gap: 1rem; margin: 0.5rem 0 0; padding: 0.9rem 1.1rem; background: var(--strip); border-radius: 16px; }
-  #totals > div:last-child { text-align: right; }
+  #totals { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 0.5rem; margin: 0.5rem 0 0; }
+  #totals > div { padding: 0.8rem 1rem; border-radius: 16px; }
+  #totals .owed { background: var(--strip-owed); }
+  #totals .owe { background: var(--strip-owe); text-align: right; }
   #totals .label { display: block; font-size: 0.8rem; color: var(--muted); }
-  #totals .total { display: block; font-size: 1.9rem; font-weight: 800; color: var(--accent); font-variant-numeric: tabular-nums; line-height: 1.2; }
-  p#balances { margin: 0.5rem 0 0; padding: 1rem 1.1rem; background: var(--strip); border-radius: 16px; font-size: 1.2rem; font-weight: 600; }
+  #totals .total { display: block; font-size: 1.75rem; font-weight: 800; font-variant-numeric: tabular-nums; line-height: 1.2; }
+  #totals .owed .total { color: var(--owed); }
+  #totals .owe .total { color: var(--owe); }
+  p#balances { margin: 0.5rem 0 0; padding: 1rem 1.1rem; background: var(--strip-owed); border-radius: 16px; font-size: 1.2rem; font-weight: 600; }
 
   .pair { display: grid; grid-template-columns: minmax(0, 1fr); gap: 0.75rem; margin-top: 0.75rem; }
   .box { background: var(--card); border: 1px solid var(--rule); border-radius: 16px; padding: 0.25rem 1rem 0.75rem; }
-  .box h2 { margin: 0.75rem 0 0.25rem; }
+  .box h2 { margin: 0.75rem 0 0.4rem; }
   .box p.quiet { margin: 0.5rem 0 0.25rem; }
+  #live > .box { margin-top: 0.75rem; }
 
   #owed li, #owing li { display: flex; align-items: center; gap: 0.75rem; padding: 0.6rem 0; border-top: 1px solid var(--rule); }
   .avatar { flex: none; width: 2rem; height: 2rem; border-radius: 50%; background: var(--av); display: inline-flex; align-items: center; justify-content: center; }
   .avatar::before { content: attr(data-initial); color: #fff; font-weight: 700; font-size: 0.9rem; }
   .who { flex: 1; min-width: 0; font-size: 1.05rem; overflow-wrap: anywhere; }
   .amount { font-size: 1.6rem; font-weight: 700; font-variant-numeric: tabular-nums; white-space: nowrap; }
+  #owed .amount { color: var(--owed); }
+  #owing .amount { color: var(--owe); }
+  .avatar.small { width: 1.25rem; height: 1.25rem; }
+  .avatar.small::before { font-size: 0.65rem; }
 
-  #bills li, #payments li { padding: 0.55rem 0; border-top: 1px solid var(--rule); font-size: 0.9rem; }
-  #bills li::before, #payments li::before { display: inline-block; margin-right: 0.4rem; padding: 0 0.5rem; border-radius: 999px; font-size: 0.7rem; font-weight: 700; line-height: 1.5; color: var(--on-accent); }
-  #bills li::before { content: "bill"; background: var(--accent-2); }
-  #payments li::before { content: "paid"; background: var(--accent); }
-  #bills .shares { display: block; color: var(--muted); }
+  /* History rows read like small receipts: what and how much first, then who
+     paid, then one chip per share, coloured by which way the money goes. */
+  #history > li { padding: 0.75rem 0; border-top: 1px solid var(--rule); }
+  .line { display: flex; align-items: baseline; gap: 0.5rem; }
+  .pill { flex: none; padding: 0.05rem 0.55rem; border-radius: 999px; background: var(--pill); color: var(--muted); font-size: 0.72rem; font-weight: 700; }
+  .what { flex: 1; min-width: 0; font-size: 1.05rem; font-weight: 650; overflow-wrap: anywhere; }
+  .line .total { font-weight: 700; font-variant-numeric: tabular-nums; white-space: nowrap; }
+  .by { display: flex; align-items: center; gap: 0.4rem; margin: 0.3rem 0 0.5rem; color: var(--muted); font-size: 0.85rem; }
+  .chips { display: flex; flex-wrap: wrap; gap: 0.4rem; }
+  .chip { display: inline-flex; align-items: center; gap: 0.35rem; padding: 0.15rem 0.6rem 0.15rem 0.2rem; border: 1px solid var(--rule); border-radius: 999px; font-size: 0.85rem; font-variant-numeric: tabular-nums; }
+  .chip.owed { border-color: var(--owed); color: var(--owed); font-weight: 600; }
+  .chip.owe { border-color: var(--owe); color: var(--owe); font-weight: 600; }
+  .actions { display: flex; justify-content: flex-end; margin-top: 0.5rem; }
+  .actions form { margin: 0; }
+  .actions button { display: inline-flex; align-items: center; gap: 0.4rem; min-height: 2.5rem; padding: 0 1rem; background: var(--card); color: var(--ink); border: 1.5px solid var(--rule); font-size: 0.875rem; font-weight: 650; }
+  .actions button:hover { border-color: var(--muted); }
+  .actions svg { width: 1rem; height: 1rem; }
   p#history { color: var(--muted); }
 
   form { margin: 0.5rem 0; }
@@ -100,8 +124,6 @@ const STYLE = `
   /* "Add bill" comes first in the page so Enter adds the bill, but it shows
      last, after "Split equally", in the order people use them. */
   form.card > button { order: 1; width: 100%; margin-top: 0.75rem; }
-  li form { display: inline; margin: 0 0 0 0.25rem; }
-  li form button { min-height: 2.75rem; padding: 0 0.4rem; background: none; color: var(--accent); font-weight: 600; text-decoration: underline; }
 
   fieldset { border: 0; padding: 0; margin: 0.75rem 0 0; }
   legend { font-size: 0.875rem; color: var(--muted); margin-bottom: 0.25rem; }
@@ -139,12 +161,12 @@ ${body}
 `;
 }
 
-function postForm(action: string, fields: Record<string, string>, label: string, cls = ""): string {
+function postForm(action: string, fields: Record<string, string>, label: string, cls = "", icon = ""): string {
   const hidden = Object.entries(fields)
     .map(([name, value]) => `<input type="hidden" name="${esc(name)}" value="${esc(value)}" />`)
     .join("");
   const klass = cls === "" ? "" : ` class="${esc(cls)}"`;
-  return `<form method="post" action="${esc(action)}">${hidden}<button type="submit"${klass}>${esc(label)}</button></form>`;
+  return `<form method="post" action="${esc(action)}">${hidden}<button type="submit"${klass}>${icon}${esc(label)}</button></form>`;
 }
 
 const alertLine = (message?: string): string => (message ? `<p role="alert">${esc(message)}</p>` : "");
@@ -253,9 +275,10 @@ const LIVE_SCRIPT = `
 const AVATARS = ["#e8946a", "#5aa0d8", "#6fbf8f", "#b48ad6", "#e0b84f", "#e07a9b"];
 
 // The initial is drawn by CSS from data-initial, so it adds no text to the row.
-function avatar(person: Person): string {
+function avatar(person: Person, size = ""): string {
   const initial = [...person.name][0] ?? "";
-  return `<span class="avatar" data-initial="${esc(initial)}" style="--av: ${AVATARS[person.id % AVATARS.length]}"></span>`;
+  const cls = size === "" ? "avatar" : `avatar ${size}`;
+  return `<span class="${cls}" data-initial="${esc(initial)}" style="--av: ${AVATARS[person.id % AVATARS.length]}"></span>`;
 }
 
 // The card's title already says which way the money goes, so the words that
@@ -266,17 +289,34 @@ function balanceLine(b: { person: Person; cents: number }): string {
   return `<li>${avatar(b.person)}<span class="who">${who}</span> <span class="amount">${formatCents(Math.abs(b.cents))}</span></li>`;
 }
 
-function entryLine(entry: Entry, base: string): string {
+// Icons drawn as lines, in the button's own colour; they carry no text.
+const ICON_DELETE = `<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true"><path d="M2.5 4h11M6 4V2.5h4V4M4 4l.7 9.5h6.6L12 4"/></svg>`;
+const ICON_NOT_ARRIVED = `<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M3.5 3.5l9 9M12.5 3.5l-9 9"/></svg>`;
+
+// One history row. The viewer is "you", so a row reads from their side, and a
+// share chip is coloured by which way that money goes for them.
+function entryLine(entry: Entry, base: string, me: Person): string {
+  const name = (p: Person): string => (p.id === me.id ? "You" : esc(p.name));
   if (entry.kind === "payment") {
+    const what = `${name(entry.from)} paid ${entry.to.id === me.id ? "you" : esc(entry.to.name)}`;
     // Only the receiver can see whether the money arrived, so only they can say it didn't.
-    const dispute = entry.toMe ? postForm(`${base}/dispute`, { payment: String(entry.id) }, "Didn't get it") : "";
-    return `<li>${esc(entry.from.name)} paid ${esc(entry.to.name)} ${formatCents(entry.cents)}${dispute}</li>`;
+    const dispute = entry.toMe
+      ? `<div class="actions">${postForm(`${base}/dispute`, { payment: String(entry.id) }, "Didn't get it", "", ICON_NOT_ARRIVED)}</div>`
+      : "";
+    return `<li class="payment"><div class="line"><span class="pill">paid</span><span class="what">${what}</span><span class="total">${formatCents(entry.cents)}</span></div>${dispute}</li>`;
   }
   const total = entry.shares.reduce((sum, s) => sum + s.cents, 0);
-  const what = entry.note === "" ? "a bill" : esc(entry.note);
-  const shares = entry.shares.map((s) => `${esc(s.person.name)} ${formatCents(s.cents)}`).join(", ");
-  const remove = entry.mine ? postForm(`${base}/delete`, { bill: String(entry.id) }, "Delete") : "";
-  return `<li>${esc(entry.paidBy.name)} paid ${formatCents(total)} for ${what}:<span class="shares"> ${shares}</span>${remove}</li>`;
+  const iPaid = entry.paidBy.id === me.id;
+  const chips = entry.shares
+    .map((s) => {
+      const side = iPaid && s.person.id !== me.id ? " owed" : !iPaid && s.person.id === me.id ? " owe" : "";
+      return `<li class="chip${side}">${avatar(s.person, "small")}${name(s.person)} ${formatCents(s.cents)}</li>`;
+    })
+    .join("");
+  const remove = entry.mine
+    ? `<div class="actions">${postForm(`${base}/delete`, { bill: String(entry.id) }, "Delete", "", ICON_DELETE)}</div>`
+    : "";
+  return `<li class="bill"><div class="line"><span class="pill">bill</span><span class="what">${entry.note === "" ? "Bill" : esc(entry.note)}</span><span class="total">${formatCents(total)}</span></div><div class="by">${avatar(entry.paidBy, "small")}${name(entry.paidBy)} paid</div><ul class="chips">${chips}</ul>${remove}</li>`;
 }
 
 export function housePage(view: HouseView): string {
@@ -291,20 +331,15 @@ export function housePage(view: HouseView): string {
   const balances =
     view.balances.length === 0
       ? `<p id="balances">Nobody owes anybody.</p>`
-      : `<div id="totals"><div><span class="label">Owed to you</span> <span class="total">${formatCents(sum(owed))}</span></div><div><span class="label">You owe</span> <span class="total">${formatCents(sum(owing))}</span></div></div>
+      : `<div id="totals"><div class="owed"><span class="label">Owed to you</span> <span class="total">${formatCents(sum(owed))}</span></div><div class="owe"><span class="label">You owe</span> <span class="total">${formatCents(sum(owing))}</span></div></div>
         <div id="balances" class="pair">
           <section class="box"><h2>Owed to you</h2>${list("owed", owed.map(balanceLine), "Nobody owes you.")}</section>
           <section class="box"><h2>You owe</h2>${list("owing", owing.map(balanceLine), "You don't owe anybody.")}</section>
         </div>`;
-  const bills = view.history.filter((e) => e.kind === "bill");
-  const payments = view.history.filter((e) => e.kind === "payment");
   const history =
     view.history.length === 0
       ? `<p id="history">No bills yet.</p>`
-      : `<div id="history" class="pair">
-          <section class="box"><h2>Bills</h2>${list("bills", bills.map((e) => entryLine(e, base)), "No bills yet.")}</section>
-          <section class="box"><h2>Payments</h2>${list("payments", payments.map((e) => entryLine(e, base)), "No payments yet.")}</section>
-        </div>`;
+      : `<section class="box"><h2>History</h2><ul id="history">${view.history.map((e) => entryLine(e, base, view.me)).join("")}</ul></section>`;
 
   const rows = view.people
     .map(

@@ -102,9 +102,7 @@ describe("being someone in a house", () => {
     expect((await addBill(code, cookie, "Rice", { [id]: "5" })).status).toBe(303);
     const later = await housePage(code, cookie);
     expect(textOf(later)).toContain("you are Dani");
-    // The line ends with Dani's own "Delete" button, hence toContain.
-    expect(historyOf(later)).toHaveLength(1);
-    expect(historyOf(later)[0]).toContain("Dani paid $5.00 for Rice: Dani $5.00");
+    expect(historyOf(later)).toEqual([{ pill: "bill", what: "Rice", total: "$5.00", by: "You paid", chips: ["You $5.00"] }]);
   });
 
   it("recognises a returning person on the join page, but not a stranger", async () => {

@@ -98,8 +98,11 @@ function viewFor(store: Store, code: string, me: Person, draft?: Draft): HouseVi
   const payments = store.payments(code);
   const net = balancesFor(me.id, bills, payments);
 
+  // History shows only what involves the viewer: bills they paid or have a
+  // share in, and payments to or from them. Balances still use everything.
   const dated: { at: number; entry: Entry }[] = [];
   for (const b of bills) {
+    if (b.paidBy !== me.id && !b.shares.some((s) => s.personId === me.id)) continue;
     const shares = [...b.shares]
       .sort((x, y) => (order.get(x.personId) ?? 0) - (order.get(y.personId) ?? 0))
       .map((s) => ({ person: who(s.personId), cents: s.cents }));
@@ -110,7 +113,7 @@ function viewFor(store: Store, code: string, me: Person, draft?: Draft): HouseVi
   }
   // A payment the receiver said never arrived is gone from the page.
   for (const p of payments) {
-    if (p.status === "rejected") continue;
+    if (p.status === "rejected" || (p.fromId !== me.id && p.toId !== me.id)) continue;
     dated.push({
       at: p.at,
       entry: { kind: "payment", id: p.id, from: who(p.fromId), to: who(p.toId), cents: p.cents, toMe: p.toId === me.id },

@@ -58,6 +58,28 @@ describe("house page", () => {
     expect(items(html, "#balances li")).toEqual(["Ari owes you $1.00", "You owe Dani $9.00"]);
   });
 
+  it("splits balances into what is owed to you and what you owe, with totals", () => {
+    const html = housePage(
+      house({
+        balances: [
+          { person: ari, cents: 100 },
+          { person: dani, cents: -900 },
+          { person: rafi, cents: 250 },
+        ],
+      }),
+    );
+    expect(items(html, "#owed li")).toEqual(["Ari owes you $1.00", "Rafi owes you $2.50"]);
+    expect(items(html, "#owing li")).toEqual(["You owe Dani $9.00"]);
+    expect(items(html, "#totals > div")).toEqual(["Owed to you $3.50", "You owe $9.00"]);
+  });
+
+  it("gives each housemate an initial that adds no text", () => {
+    const html = housePage(house({ balances: [{ person: ari, cents: 100 }] }));
+    const avatar = doc(html).querySelector("#owed li .avatar")!;
+    expect(avatar.getAttribute("data-initial")).toBe("A");
+    expect(avatar.textContent).toBe("");
+  });
+
   it("sets each balance's amount apart, so it can be read at arm's length", () => {
     const html = housePage(
       house({
@@ -86,8 +108,7 @@ describe("house page", () => {
         ],
       }),
     );
-    const lines = items(html, "#history li");
-    expect(lines[0]).toContain("Dani paid Rafi $15.50");
+    expect(items(html, "#payments li")[0]).toContain("Dani paid Rafi $15.50");
     const forms = [...doc(html).querySelectorAll('form[action="/h/ABC234/dispute"]')];
     expect(forms.map((f) => f.querySelector<HTMLInputElement>('input[name="payment"]')!.value)).toEqual(["7"]);
     expect(forms[0].textContent).toBe("Didn't get it");
@@ -99,7 +120,7 @@ describe("house page", () => {
     expect(doc(html).querySelector("main")!.textContent).not.toMatch(/confirm|waiting|did you get/i);
   });
 
-  it("lists the history, with delete only on your own bills", () => {
+  it("lists bills and payments apart, with delete only on your own bills", () => {
     const html = housePage(
       house({
         history: [
@@ -119,10 +140,10 @@ describe("house page", () => {
         ],
       }),
     );
-    const lines = items(html, "#history li");
-    expect(lines[0]).toBe("Dani paid Ari $5.00");
-    expect(lines[1]).toContain("Dani paid $3.00 for a bill: Rafi $3.00");
-    expect(lines[2]).toContain("Rafi paid $13.50 for Woolies: Ari $9.00, Dani $4.50");
+    expect(items(html, "#payments li")).toEqual(["Dani paid Ari $5.00"]);
+    const bills = items(html, "#bills li");
+    expect(bills[0]).toContain("Dani paid $3.00 for a bill: Rafi $3.00");
+    expect(bills[1]).toContain("Rafi paid $13.50 for Woolies: Ari $9.00, Dani $4.50");
     const deletes = [...doc(html).querySelectorAll('form[action="/h/ABC234/delete"]')];
     expect(deletes.map((f) => f.querySelector<HTMLInputElement>('input[name="bill"]')!.value)).toEqual(["1"]);
   });

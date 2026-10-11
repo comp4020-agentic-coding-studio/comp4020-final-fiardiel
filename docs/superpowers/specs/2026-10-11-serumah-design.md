@@ -66,8 +66,9 @@ These are the author's decisions.
   re-enter).
 - Record a payment you made to someone; it counts at once. The receiver can
   say it never arrived, which removes it.
-- See your balances with each housemate and the house's history of bills and
-  payments, newest first.
+- See your balances with each housemate, split into what is owed to you and
+  what you owe (with a total for each), and the house's history, split into
+  bills and payments, each newest first.
 - Every change above reaches every open page in that house within about a
   second, without a reload.
 

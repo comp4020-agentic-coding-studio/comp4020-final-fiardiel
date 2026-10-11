@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { addBill, balancesOf, historyOf, housePage, joinAs, newHouse, post, press, send, setUpHouse, textOf } from "./helpers.ts";
+import { addBill, balancesOf, historyOf, housePage, paymentsOf, joinAs, newHouse, post, press, send, setUpHouse, textOf } from "./helpers.ts";
 
 describe("bills", () => {
   it("puts the amounts the payer typed on each person", async () => {
@@ -91,14 +91,14 @@ describe("payments", () => {
     expect((await post(`/h/${code}/pay`, cookies.Dina, { to: ids.Rafi, amount: "15.50" })).status).toBe(303);
     expect(textOf(await housePage(code, cookies.Dina))).toContain("Nobody owes anybody.");
     expect(textOf(await housePage(code, cookies.Rafi))).toContain("Nobody owes anybody.");
-    expect(historyOf(await housePage(code, cookies.Dina))[0]).toBe("Dina paid Rafi $15.50");
+    expect(paymentsOf(await housePage(code, cookies.Dina))).toEqual(["Dina paid Rafi $15.50"]);
   });
 
   it("brings the debt back when the receiver says the money never arrived", async () => {
     const { code, cookies, ids } = await owing();
     await post(`/h/${code}/pay`, cookies.Dina, { to: ids.Rafi, amount: "15.50" });
     const rafiPage = await housePage(code, cookies.Rafi);
-    expect(historyOf(rafiPage)[0]).toContain("Dina paid Rafi $15.50");
+    expect(paymentsOf(rafiPage)[0]).toContain("Dina paid Rafi $15.50");
     expect((await press(rafiPage, "Didn't get it", cookies.Rafi)).status).toBe(303);
     const dina = await housePage(code, cookies.Dina);
     expect(balancesOf(dina)).toEqual(["You owe Rafi $15.50"]);

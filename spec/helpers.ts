@@ -45,6 +45,8 @@ const lines = (html: string, selector: string): string[] =>
   [...parse(html).querySelectorAll(selector)].map((n) => (n.textContent ?? "").replace(/\s+/g, " ").trim());
 export const balancesOf = (html: string): string[] => lines(html, "#balances li");
 export const historyOf = (html: string): string[] => lines(html, "#history li");
+export const billsOf = (html: string): string[] => lines(html, "#bills li");
+export const paymentsOf = (html: string): string[] => lines(html, "#payments li");
 
 export async function newHouse(): Promise<string> {
   const res = await send("/houses", { method: "POST" });

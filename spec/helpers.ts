@@ -108,3 +108,36 @@ export async function setUpHouse(...names: string[]) {
   }
   return { code, cookies, ids };
 }
+
+// Opens a house's event stream the way EventSource would. `waitFor` reads until
+// the text appears or `ms` passes; one read is kept pending across calls so no
+// chunk is lost to a timeout.
+export async function openEvents(code: string, cookie: string | undefined) {
+  const controller = new AbortController();
+  const headers: Record<string, string> = { accept: "text/event-stream" };
+  if (cookie) headers.cookie = cookie;
+  const res = await fetch(new URL(`/h/${code}/events`, baseUrl), { headers, redirect: "manual", signal: controller.signal });
+  const reader = res.body?.getReader();
+  const decoder = new TextDecoder();
+  let buffer = "";
+  let pending: Promise<ReadableStreamReadResult<Uint8Array>> | null = null;
+
+  async function waitFor(text: string, ms: number): Promise<boolean> {
+    if (reader === undefined) return false;
+    const deadline = Date.now() + ms;
+    while (!buffer.includes(text)) {
+      const left = deadline - Date.now();
+      if (left <= 0) return false;
+      pending ??= reader.read();
+      const chunk = await Promise.race([pending, new Promise<null>((r) => setTimeout(() => r(null), left))]);
+      if (chunk === null) return false;
+      pending = null;
+      if (chunk.done) return false;
+      buffer += decoder.decode(chunk.value, { stream: true });
+    }
+    buffer = buffer.slice(buffer.indexOf(text) + text.length);
+    return true;
+  }
+
+  return { status: res.status, type: res.headers.get("content-type") ?? "", waitFor, close: () => controller.abort() };
+}

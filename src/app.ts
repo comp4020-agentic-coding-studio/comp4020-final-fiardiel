@@ -227,7 +227,12 @@ async function house(
 
   // Everything below needs to know who is acting.
   const me = current;
+  // A browser's EventSource can't follow a redirect to a page, so the stream
+  // refuses outright instead.
+  if (me === null && action === "events") throw new HttpError(403, "Join this house to see it live.");
   if (me === null) return redirect(res, `/h/${code}/join`);
+
+  if (method === "GET" && action === "events") return hub.open(code, res);
 
   if (method === "GET" && action === "") {
     return sendHtml(res, 200, housePage(viewFor(store, code, me)));

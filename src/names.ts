@@ -19,3 +19,14 @@ export function normaliseName(raw: string): string | null {
 export function nameKey(name: string): string {
   return name.replace(/\p{Default_Ignorable_Code_Point}/gu, "").toLowerCase();
 }
+
+export const NOTE_MAX = 80;
+
+// A bill's note ("Woolies, Sat") is shown to the whole house like a name, so
+// it gets the same cleaning. It may be empty.
+export function normaliseNote(raw: string): string | null {
+  const note = raw.trim().replace(/\s+/g, " ").normalize("NFC");
+  if ([...note].length > NOTE_MAX) return null;
+  if (/\p{Cc}/u.test(note) || BIDI_CONTROLS.test(note)) return null;
+  return note;
+}

@@ -1,6 +1,6 @@
 import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
-import { NAME_MAX, nameKey, normaliseName } from "../../src/names.ts";
+import { NAME_MAX, nameKey, normaliseName, normaliseNote } from "../../src/names.ts";
 
 describe("normaliseName", () => {
   it("trims and collapses whitespace", () => {
@@ -53,5 +53,19 @@ describe("normaliseName", () => {
 describe("nameKey", () => {
   it("ignores case and invisible characters", () => {
     expect(nameKey("Dani\u00ad")).toBe(nameKey("dani"));
+  });
+});
+
+describe("normaliseNote", () => {
+  it("trims and collapses spaces, and allows an empty note", () => {
+    expect(normaliseNote("  Woolies   Sat ")).toBe("Woolies Sat");
+    expect(normaliseNote("   ")).toBe("");
+  });
+
+  it("refuses notes that are too long or hold control characters", () => {
+    expect(normaliseNote("x".repeat(80))).toBe("x".repeat(80));
+    expect(normaliseNote("x".repeat(81))).toBeNull();
+    expect(normaliseNote("bad\u0007note")).toBeNull();
+    expect(normaliseNote("evil‮etirw")).toBeNull();
   });
 });

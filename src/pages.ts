@@ -92,6 +92,7 @@ export function homePage(message?: string, mine: { code: string; name: string }[
     "Serumah",
     `      <h1>Serumah</h1>
       <p>Split your house's bills and see who owes whom.</p>
+      <p class="quiet">Based on Serumah, the Telegram bot by <a href="https://github.com/davinpwk">davinpwk</a>.</p>
       ${alertLine(message)}${houses}
       <form method="post" action="/houses">
         <button type="submit">Start a new house</button>

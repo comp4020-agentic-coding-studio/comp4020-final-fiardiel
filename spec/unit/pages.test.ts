@@ -239,6 +239,12 @@ describe("home page", () => {
   it("shows a message when given one", () => {
     expect(text(homePage("No such house"))).toContain("No such house");
   });
+
+  it("credits the Serumah bot this app is based on, and its maker", () => {
+    const html = homePage();
+    expect(text(html)).toContain("Based on Serumah, the Telegram bot by davinpwk");
+    expect(doc(html).querySelector('a[href="https://github.com/davinpwk"]')?.textContent).toBe("davinpwk");
+  });
 });
 
 describe("live script", () => {

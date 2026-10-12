@@ -68,7 +68,7 @@ describe("bills", () => {
     await addBill(code, cookies.Rafi, "", { [ids.Dina]: "5" });
     const id = /name="bill" value="(\d+)"/.exec(await housePage(code, cookies.Rafi))?.[1] ?? "";
     expect((await post(`/h/${code}/delete`, cookies.Dina, { bill: id })).status).toBe(403);
-    expect((await post(`/h/${code}/delete`, cookies.Rafi, { bill: id })).status).toBe(303);
+    expect((await press(await housePage(code, cookies.Rafi), "Yes, delete", cookies.Rafi)).status).toBe(303);
     expect(balancesOf(await housePage(code, cookies.Dina))).toEqual([]);
     const again = await post(`/h/${code}/delete`, cookies.Rafi, { bill: id });
     expect(again.status).toBe(404);

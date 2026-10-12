@@ -37,7 +37,8 @@ export function esc(text: string): string {
 // terracotta for what you owe. Both sides have the same size and weight, and
 // neither is red or green, so nobody is marked. The history pills say the kind
 // of entry instead, in two colours kept clear of both directions: mustard for
-// a bill, plum for a payment. Buttons stay neutral. Each housemate has a
+// a bill, plum for a payment. Buttons stay neutral, except Delete, which is
+// red because it removes something; red never marks money. Each housemate has a
 // coloured initial so people are easy to tell apart at a glance.
 const STYLE = `
   :root {
@@ -46,6 +47,7 @@ const STYLE = `
     --rule: #e6e3dd; --accent: #2f4fa2; --on-accent: #ffffff; --pill: #eceae5;
     --owed: #2f4fa2; --owe: #b8643e; --strip-owed: #e6ebf7; --strip-owe: #f8e9e1;
     --bill-bg: #f5e9c4; --bill-ink: #74570d; --paid-bg: #ebdcf3; --paid-ink: #6b3d84;
+    --danger: #b3261e; --on-danger: #ffffff;
   }
   @media (prefers-color-scheme: dark) {
     :root {
@@ -53,6 +55,7 @@ const STYLE = `
       --rule: #2c3346; --accent: #8aa6ff; --on-accent: #13161f; --pill: #2a3142;
       --owed: #8aa6ff; --owe: #ef9a70; --strip-owed: #1d2847; --strip-owe: #3a2620;
       --bill-bg: #3a3118; --bill-ink: #e6c766; --paid-bg: #33263e; --paid-ink: #d2abe8;
+      --danger: #ff6b66; --on-danger: #13161f;
     }
   }
   * { box-sizing: border-box; }
@@ -119,6 +122,21 @@ const STYLE = `
   .actions button { display: inline-flex; align-items: center; gap: 0.4rem; min-height: 2.5rem; padding: 0 1rem; background: var(--card); color: var(--ink); border: 1.5px solid var(--rule); font-size: 0.875rem; font-weight: 650; }
   .actions button:hover { border-color: var(--muted); }
   .actions svg { width: 1rem; height: 1rem; }
+
+  /* Delete is the one red thing on the page, and red means only that: this
+     removes something. It asks first, in the row, before anything is sent. */
+  .confirm { margin-top: 0.875rem; }
+  .confirm summary { display: flex; align-items: center; gap: 0.4rem; width: max-content; min-height: 2.5rem; margin-left: auto; padding: 0 1rem; border: 1.5px solid var(--danger); border-radius: 999px; color: var(--danger); font-size: 0.875rem; font-weight: 650; cursor: pointer; list-style: none; }
+  .confirm summary::-webkit-details-marker { display: none; }
+  .confirm summary svg { width: 1rem; height: 1rem; }
+  .confirm[open] summary { border-color: var(--rule); color: var(--ink); }
+  .confirm[open] summary svg, .confirm .opened, .confirm[open] .closed { display: none; }
+  .confirm[open] .opened { display: inline; }
+  .ask { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 0.75rem; margin-top: 0.75rem; padding: 0.875rem 1rem; border: 1.5px solid var(--danger); border-radius: 14px; }
+  .ask p { margin: 0; font-weight: 600; }
+  .ask form { margin: 0; }
+  button.danger { display: inline-flex; align-items: center; gap: 0.4rem; min-height: 2.5rem; padding: 0 1rem; background: var(--danger); color: var(--on-danger); font-size: 0.875rem; }
+  button.danger svg { width: 1rem; height: 1rem; }
   p#history { color: var(--muted); }
   main > p.quiet:last-child { margin: 2.5rem 0 0; }
 
@@ -254,6 +272,10 @@ const LIVE_SCRIPT = `
     if (!res.ok) return;
     const next = new DOMParser().parseFromString(await res.text(), "text/html").getElementById("live");
     if (!next) return;
+    // A delete question someone has open stays open through the update.
+    for (const open of live.querySelectorAll("details.confirm[open]")) {
+      next.querySelector('details.confirm[data-bill="' + open.dataset.bill + '"]')?.setAttribute("open", "");
+    }
     live.replaceWith(next);
     live = next;
   }
@@ -319,8 +341,10 @@ function entryLine(entry: Entry, base: string, me: Person): string {
       return `<li class="chip${side}">${avatar(s.person, "small")}${name(s.person)} ${formatCents(s.cents)}</li>`;
     })
     .join("");
+  // Deleting asks first, without needing script: "Delete" opens the question
+  // (and becomes "Cancel"), and only "Yes, delete" sends the form.
   const remove = entry.mine
-    ? `<div class="actions">${postForm(`${base}/delete`, { bill: String(entry.id) }, "Delete", "", ICON_DELETE)}</div>`
+    ? `<details class="confirm" data-bill="${entry.id}"><summary>${ICON_DELETE}<span class="closed">Delete</span><span class="opened">Cancel</span></summary><div class="ask"><p>Delete this bill for everyone?</p>${postForm(`${base}/delete`, { bill: String(entry.id) }, "Yes, delete", "danger", ICON_DELETE)}</div></details>`
     : "";
   return `<li class="bill"><div class="line"><span class="pill bill">Bill</span><span class="what">${entry.note === "" ? "Bill" : esc(entry.note)}</span><span class="total">${formatCents(total)}</span></div><div class="by">${avatar(entry.paidBy, "small")}${name(entry.paidBy)} paid</div><ul class="chips">${chips}</ul>${remove}</li>`;
 }

@@ -171,6 +171,20 @@ describe("house page", () => {
     expect(deletes[0].querySelector("button svg")).not.toBeNull();
   });
 
+  it("asks before deleting a bill, so a stray tap deletes nothing", () => {
+    const html = housePage(
+      house({ history: [{ kind: "bill", id: 1, paidBy: rafi, note: "Woolies", shares: [{ person: ari, cents: 900 }], mine: true }] }),
+    );
+    const confirm = doc(html).querySelector("#history details.confirm")!;
+    expect(confirm.hasAttribute("open")).toBe(false);
+    expect(confirm.querySelector("summary")!.textContent).toContain("Delete");
+    // The form that deletes sits inside the closed question, behind its own button.
+    const form = confirm.querySelector('form[action="/h/ABC234/delete"]')!;
+    expect(form.querySelector("button")!.textContent).toBe("Yes, delete");
+    expect(confirm.textContent).toContain("Delete this bill for everyone?");
+    expect(doc(html).querySelectorAll('form[action="/h/ABC234/delete"]')).toHaveLength(1);
+  });
+
 
   it("shows names and notes as text, never as markup", () => {
     const evil = { id: 4, name: "<b>x</b>" };
@@ -415,6 +429,37 @@ describe("live script", () => {
     sources[0].readyState = 0;
     for (const fn of sources[0].listeners.error ?? []) fn();
     expect(sources).toHaveLength(1);
+  });
+
+  it("keeps an open delete question open when the page updates", async () => {
+    const page = housePage(
+      house({ history: [{ kind: "bill", id: 1, paidBy: rafi, note: "Woolies", shares: [{ person: ari, cents: 900 }], mine: true }] }),
+    );
+    const sources: { listeners: Record<string, (() => void)[]> }[] = [];
+    const dom = new JSDOM(page, {
+      runScripts: "dangerously",
+      beforeParse(window) {
+        Object.assign(window, {
+          EventSource: class {
+            static CLOSED = 2;
+            readyState = 0;
+            listeners: Record<string, (() => void)[]> = {};
+            constructor() {
+              sources.push(this);
+            }
+            addEventListener(type: string, fn: () => void) {
+              (this.listeners[type] ??= []).push(fn);
+            }
+          },
+          fetch: async () => ({ ok: true, text: async () => page }),
+        });
+      },
+    });
+    dom.window.document.querySelector("details.confirm")!.setAttribute("open", "");
+    for (const fn of sources[0].listeners.changed ?? []) fn();
+    await new Promise((r) => setTimeout(r, 20));
+    const after = dom.window.document.querySelector("details.confirm")!;
+    expect(after.hasAttribute("open")).toBe(true);
   });
 
   it("re-fetches the page it is on, not always the house page", async () => {

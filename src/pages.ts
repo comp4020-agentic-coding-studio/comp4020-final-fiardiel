@@ -58,35 +58,39 @@ const STYLE = `
   * { box-sizing: border-box; }
   [hidden] { display: none !important; }
   body { margin: 0; background: var(--paper); color: var(--ink); font: 1rem/1.5 system-ui, -apple-system, "Segoe UI", sans-serif; }
-  main { max-width: 32rem; margin: 0 auto; padding: 1.25rem 1rem 2.5rem; }
-  h1 { font: 700 2rem/1.15 Georgia, "Times New Roman", serif; margin: 0.25rem 0 0.75rem; }
-  h2 { font-size: 0.95rem; font-weight: 650; margin: 1.5rem 0 0.5rem; }
+  main { max-width: 32rem; margin: 0 auto; padding: 1.75rem 1.25rem 3rem; }
+  h1 { font: 700 2rem/1.15 Georgia, "Times New Roman", serif; margin: 0 0 1rem; }
+  h2 { font-size: 0.95rem; font-weight: 650; margin: 2rem 0 0.75rem; }
   a { color: var(--accent); }
   .quiet { color: var(--muted); font-size: 0.875rem; }
   .sr { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
   ul { list-style: none; padding: 0; margin: 0; }
   :focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
 
-  .top { display: flex; flex-wrap: wrap; justify-content: space-between; align-items: baseline; column-gap: 1rem; }
-  .top p { margin: 0 0 0.75rem; }
+  /* Spacing keeps to three distances: about 8px between the parts of one
+     thing, 12 to 16px between rows, and 24 to 32px between groups. */
+  .top { margin-bottom: 1.5rem; }
+  .top h1 { margin: 0 0 0.375rem; }
+  .top p { margin: 0; line-height: 1.6; }
 
-  #totals { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 0.5rem; margin: 0.5rem 0 0; }
-  #totals > div { padding: 0.8rem 1rem; border-radius: 16px; }
+  #totals { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 0.75rem; margin: 0; }
+  #totals > div { padding: 1rem 1.125rem; border-radius: 18px; }
   #totals .owed { background: var(--strip-owed); }
   #totals .owe { background: var(--strip-owe); text-align: right; }
-  #totals .label { display: block; font-size: 0.8rem; color: var(--muted); }
+  #totals .label { display: block; margin-bottom: 0.25rem; font-size: 0.8rem; color: var(--muted); }
   #totals .total { display: block; font-size: 1.75rem; font-weight: 800; font-variant-numeric: tabular-nums; line-height: 1.2; }
   #totals .owed .total { color: var(--owed); }
   #totals .owe .total { color: var(--owe); }
-  p#balances { margin: 0.5rem 0 0; padding: 1rem 1.1rem; background: var(--strip-owed); border-radius: 16px; font-size: 1.2rem; font-weight: 600; }
+  p#balances { margin: 0; padding: 1.25rem; background: var(--strip-owed); border-radius: 16px; font-size: 1.2rem; font-weight: 600; }
 
-  .pair { display: grid; grid-template-columns: minmax(0, 1fr); gap: 0.75rem; margin-top: 0.75rem; }
-  .box { background: var(--card); border: 1px solid var(--rule); border-radius: 16px; padding: 0.25rem 1rem 0.75rem; }
-  .box h2 { margin: 0.75rem 0 0.4rem; }
-  .box p.quiet { margin: 0.5rem 0 0.25rem; }
-  #live > .box { margin-top: 0.75rem; }
+  .pair { display: grid; grid-template-columns: minmax(0, 1fr); gap: 1rem; margin-top: 2rem; }
+  .box { background: var(--card); border: 1px solid var(--rule); border-radius: 18px; padding: 1.125rem 1.25rem 0.5rem; }
+  .box h2 { margin: 0 0 0.5rem; }
+  .box p.quiet { margin: 0.75rem 0 1rem; }
+  #live > .box, #live > p#history { margin-top: 2rem; }
+  .back + #live > :first-child { margin-top: 0; }
 
-  #owed li, #owing li { display: flex; align-items: center; gap: 0.75rem; padding: 0.6rem 0; border-top: 1px solid var(--rule); }
+  #owed li, #owing li { display: flex; align-items: center; gap: 0.875rem; padding: 0.875rem 0; border-top: 1px solid var(--rule); }
   .avatar { flex: none; width: 2rem; height: 2rem; border-radius: 50%; background: var(--av); display: inline-flex; align-items: center; justify-content: center; }
   .avatar::before { content: attr(data-initial); color: #fff; font-weight: 700; font-size: 0.9rem; }
   .who { flex: 1; min-width: 0; font-size: 1.05rem; overflow-wrap: anywhere; }
@@ -98,28 +102,32 @@ const STYLE = `
 
   /* History rows read like small receipts: what and how much first, then who
      paid, then one chip per share, coloured by which way the money goes. */
-  #history > li { padding: 0.75rem 0; border-top: 1px solid var(--rule); }
-  .line { display: flex; align-items: baseline; gap: 0.5rem; }
-  .pill { flex: none; padding: 0.05rem 0.55rem; border-radius: 999px; background: var(--pill); color: var(--muted); font-size: 0.72rem; font-weight: 700; }
+  #history > li { padding: 1.125rem 0; border-top: 1px solid var(--rule); }
+  .line { display: flex; align-items: baseline; gap: 0.625rem; line-height: 1.35; }
+  .pill { flex: none; padding: 0.125rem 0.625rem; border-radius: 999px; background: var(--pill); color: var(--muted); font-size: 0.72rem; font-weight: 700; }
   .pill.bill { background: var(--bill-bg); color: var(--bill-ink); }
   .pill.paid { background: var(--paid-bg); color: var(--paid-ink); }
   .what { flex: 1; min-width: 0; font-size: 1.05rem; font-weight: 650; overflow-wrap: anywhere; }
   .line .total { font-weight: 700; font-variant-numeric: tabular-nums; white-space: nowrap; }
-  .by { display: flex; align-items: center; gap: 0.4rem; margin: 0.3rem 0 0.5rem; color: var(--muted); font-size: 0.85rem; }
-  .chips { display: flex; flex-wrap: wrap; gap: 0.4rem; }
-  .chip { display: inline-flex; align-items: center; gap: 0.35rem; padding: 0.15rem 0.6rem 0.15rem 0.2rem; border: 1px solid var(--rule); border-radius: 999px; font-size: 0.85rem; font-variant-numeric: tabular-nums; }
+  .by { display: flex; align-items: center; gap: 0.5rem; margin: 0.5rem 0 0.75rem; color: var(--muted); font-size: 0.85rem; }
+  .chips { display: flex; flex-wrap: wrap; gap: 0.5rem; }
+  .chip { display: inline-flex; align-items: center; gap: 0.4rem; padding: 0.25rem 0.75rem 0.25rem 0.25rem; border: 1px solid var(--rule); border-radius: 999px; font-size: 0.85rem; font-variant-numeric: tabular-nums; }
   .chip.owed { border-color: var(--owed); color: var(--owed); font-weight: 600; }
   .chip.owe { border-color: var(--owe); color: var(--owe); font-weight: 600; }
-  .actions { display: flex; justify-content: flex-end; margin-top: 0.5rem; }
+  .actions { display: flex; justify-content: flex-end; margin-top: 0.875rem; }
   .actions form { margin: 0; }
   .actions button { display: inline-flex; align-items: center; gap: 0.4rem; min-height: 2.5rem; padding: 0 1rem; background: var(--card); color: var(--ink); border: 1.5px solid var(--rule); font-size: 0.875rem; font-weight: 650; }
   .actions button:hover { border-color: var(--muted); }
   .actions svg { width: 1rem; height: 1rem; }
   p#history { color: var(--muted); }
+  main > p.quiet:last-child { margin: 2.5rem 0 0; }
 
-  form { margin: 0.5rem 0; }
-  form.card { display: flex; flex-direction: column; background: var(--card); border: 1px solid var(--rule); border-radius: 16px; padding: 1rem; }
-  label { display: block; margin: 0.25rem 0; }
+  form { margin: 0.75rem 0; }
+  main > form { margin: 1.25rem 0; }
+  label + button { margin-top: 0.75rem; }
+  form.card { display: flex; flex-direction: column; background: var(--card); border: 1px solid var(--rule); border-radius: 18px; padding: 1.25rem; gap: 1rem; }
+  label { display: block; margin: 0; }
+  label > input:not([type="checkbox"]), label > select { display: block; margin-top: 0.375rem; }
   input, select, button { font: inherit; min-height: 2.75rem; border-radius: 12px; }
   input, select { width: 100%; padding: 0 0.75rem; border: 1px solid var(--rule); background: var(--paper); color: var(--ink); }
   input[type="checkbox"] { width: 1.25rem; min-height: 1.25rem; margin: 0; accent-color: var(--accent); }
@@ -127,25 +135,25 @@ const STYLE = `
   button.secondary { background: transparent; color: var(--accent); border: 1.5px solid var(--accent); }
 
   /* The two things people come to do, as buttons that open their own page. */
-  .do { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 0.5rem; margin-top: 0.75rem; }
+  .do { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 0.75rem; margin-top: 1rem; }
   a.button { display: flex; align-items: center; justify-content: center; min-height: 2.75rem; padding: 0 1rem; border-radius: 999px; background: var(--accent); color: var(--on-accent); font-weight: 700; text-decoration: none; text-align: center; }
   a.button.secondary { background: transparent; color: var(--accent); border: 1.5px solid var(--accent); }
-  .back { margin: 0 0 0.5rem; }
-  h2.page { font-size: 1.25rem; margin: 0.75rem 0 0.5rem; }
+  .back { margin: 0 0 1rem; }
+  h2.page { font-size: 1.25rem; margin: 0 0 1rem; }
   .back a, .more a { font-weight: 650; text-decoration: none; }
-  .more { margin: 0.6rem 0 0; text-align: center; }
+  .more { margin: 1rem 0 0; text-align: center; }
   /* "Add bill" comes first in the page so Enter adds the bill, but it shows
      last, after "Split equally", in the order people use them. */
-  form.card > button { order: 1; width: 100%; margin-top: 0.75rem; }
+  form.card > button { order: 1; width: 100%; margin-top: 0.5rem; }
 
-  fieldset { border: 0; padding: 0; margin: 0.75rem 0 0; }
-  legend { font-size: 0.875rem; color: var(--muted); margin-bottom: 0.25rem; }
-  .row { display: grid; grid-template-columns: 1fr 7rem; align-items: center; gap: 0.75rem; margin: 0; padding: 0.35rem 0; border-bottom: 1px solid var(--rule); }
-  .row label { display: flex; align-items: center; gap: 0.6rem; margin: 0; }
+  fieldset { border: 0; padding: 0; margin: 0; min-width: 0; }
+  legend { padding: 0; font-size: 0.875rem; color: var(--muted); margin-bottom: 0.375rem; }
+  .row { display: grid; grid-template-columns: 1fr 7rem; align-items: center; gap: 1rem; margin: 0; padding: 0.625rem 0; border-bottom: 1px solid var(--rule); }
+  .row label { display: flex; align-items: center; gap: 0.75rem; margin: 0; }
   .row input:not([type="checkbox"]), .split input { text-align: right; }
-  .split { display: grid; grid-template-columns: 1fr auto; align-items: end; gap: 0.5rem; margin: 0.75rem 0 0; }
-  .split label { margin: 0; font-size: 0.875rem; color: var(--muted); }
-  [role="alert"], [role="status"] { margin: 0.5rem 0; padding: 0.5rem 0.75rem; background: var(--card); border-left: 3px solid var(--accent); border-radius: 8px; }
+  .split { display: grid; grid-template-columns: 1fr auto; align-items: end; gap: 0.75rem; margin: 0; }
+  .split label { margin: 0; font-size: 0.875rem; line-height: 1.4; color: var(--muted); }
+  [role="alert"], [role="status"] { margin: 0 0 1rem; padding: 0.75rem 1rem; background: var(--card); border-left: 3px solid var(--accent); border-radius: 8px; }
 
   /* Side by side once there is room; stacked on phones. */
   @media (min-width: 44rem) {

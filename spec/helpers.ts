@@ -41,6 +41,9 @@ const parse = (html: string): Document => new JSDOM(html).window.document;
 export const textOf = (html: string): string => parse(html).body.textContent ?? "";
 export const buttonsOf = (html: string): string[] =>
   [...parse(html).querySelectorAll("button")].map((b) => b.textContent ?? "");
+// The names on the "who's using Serumah?" tiles, in order (not the New tile).
+export const tilesOf = (html: string): string[] =>
+  [...parse(html).querySelectorAll("a.tile:not(.new) .name")].map((n) => n.textContent ?? "");
 const lines = (html: string, selector: string): string[] =>
   [...parse(html).querySelectorAll(selector)].map((n) => (n.textContent ?? "").replace(/\s+/g, " ").trim());
 export const balancesOf = (html: string): string[] => lines(html, "#balances li");
@@ -65,8 +68,8 @@ export async function newHouse(): Promise<string> {
   return match[1];
 }
 
-export async function joinAs(code: string, name: string): Promise<string> {
-  const res = await send(`/h/${code}/join`, { form: { name } });
+export async function joinAs(code: string, name: string, pin = "1234"): Promise<string> {
+  const res = await send(`/h/${code}/join`, { form: { name, pin } });
   if (res.status !== 303) throw new Error(`joining as ${JSON.stringify(name)} gave ${res.status}`);
   return cookieOf(res);
 }
@@ -92,14 +95,19 @@ export async function press(html: string, label: string, cookie: string): Promis
   return send(form.getAttribute("action") ?? "", { cookie, form: fields });
 }
 
-// The id behind a name, read off the join page's "that's me" buttons.
+// The id behind a name, read off the join page's tile links (/h/<code>/as/<id>).
 export async function personIdOf(code: string, name: string): Promise<string> {
   const doc = parse(await (await send(`/h/${code}/join`)).text());
-  for (const form of doc.querySelectorAll("form")) {
-    const id = form.querySelector<HTMLInputElement>('input[name="person"]')?.value;
-    if (id !== undefined && form.querySelector("button")?.textContent === name) return id;
+  for (const tile of doc.querySelectorAll("a.tile")) {
+    const id = tile.getAttribute("href")?.match(new RegExp(`^/h/${code}/as/(\\d+)$`))?.[1];
+    if (id !== undefined && tile.querySelector(".name")?.textContent === name) return id;
   }
   throw new Error(`${name} is not listed on the join page of ${code}`);
+}
+
+// Opening a name on a new device: post its PIN to the name's PIN page.
+export function signInAs(code: string, id: string, pin: string): Promise<Response> {
+  return send(`/h/${code}/as/${id}`, { form: { pin } });
 }
 
 // Amounts are keyed by person id, as typed into the boxes.

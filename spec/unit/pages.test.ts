@@ -1,6 +1,20 @@
 import { JSDOM } from "jsdom";
 import { describe, expect, it } from "vitest";
-import { billPage, esc, historyPage, homePage, housePage, joinPage, layout, payPage } from "../../src/pages.ts";
+import {
+  billPage,
+  esc,
+  historyPage,
+  homePage,
+  housePage,
+  joinPage,
+  layout,
+  newNamePage,
+  newPinPage,
+  payPage,
+  pinPage,
+  resetCodePage,
+  resetPinPage,
+} from "../../src/pages.ts";
 import type { HouseView } from "../../src/pages.ts";
 
 const dani = { id: 1, name: "Dani" };
@@ -242,6 +256,15 @@ describe("house page", () => {
   });
 });
 
+describe("PIN changes in the history", () => {
+  it("say plainly whose PIN was changed, as text", () => {
+    const html = housePage(house({ history: [{ kind: "pin", person: { id: 9, name: "<b>Dani</b>" } }] }));
+    expect(items(html, "#history > li")).toEqual(["<b>Dani</b>'s PIN was changed"]);
+    expect(doc(html).querySelector("#history b")).toBeNull();
+    expect(doc(html).querySelector("#history .pill")).toBeNull();
+  });
+});
+
 describe("history page", () => {
   it("lists every entry, live, with a way back", () => {
     const html = historyPage(house({ history: Array.from({ length: 7 }, (_, i) => ({ kind: "payment" as const, id: i + 1, from: dani, to: rafi, cents: 100, toMe: true })) }));
@@ -299,45 +322,81 @@ describe("payment page", () => {
   });
 });
 
-describe("join page", () => {
-  it("shows the house code and lets existing names be claimed", () => {
-    const html = joinPage("ABC234", [dani, rafi]);
-    expect(text(html)).toContain("ABC234");
-    expect(buttons(html)).toEqual(["Join", "Dani", "Rafi"]);
+describe("who's using Serumah?", () => {
+  it("shows one tile per name, each opening that name's PIN page, and a New tile", () => {
+    const d = doc(joinPage("ABC234", [dani, rafi]));
+    const tiles = [...d.querySelectorAll("a.tile")].map((a) => [a.getAttribute("href"), a.textContent]);
+    expect(tiles).toEqual([
+      ["/h/ABC234/as/1", "Dani"],
+      ["/h/ABC234/as/2", "Rafi"],
+      ["/h/ABC234/new", "New"],
+    ]);
+    expect(buttons(joinPage("ABC234", [dani, rafi]))).toEqual([]);
+    expect(text(joinPage("ABC234", []))).toContain("ABC234");
   });
 
-  it("escapes names and messages", () => {
-    const html = joinPage("ABC234", [{ id: 9, name: "<b>x</b>" }], "<i>careful</i>");
-    expect(doc(html).querySelector("b")).toBeNull();
-    expect(doc(html).querySelector("i")).toBeNull();
-    expect(text(html)).toContain("<b>x</b>");
+  it("sends this device's own name straight to the house", () => {
+    const d = doc(joinPage("ABC234", [dani, rafi], dani));
+    expect(d.querySelector('a.tile[href="/h/ABC234"]')?.textContent).toContain("Dani");
+    expect(d.querySelector('a.tile[href="/h/ABC234/as/1"]')).toBeNull();
+    expect(d.querySelector('a.tile[href="/h/ABC234/as/2"]')).not.toBeNull();
   });
 
-  it("recognises a returning person, only when told who they are", () => {
-    const known = joinPage("ABC234", [dani], undefined, dani);
-    expect(text(known)).toContain("You're already in this house as Dani");
-    expect(doc(known).querySelector('a[href="/h/ABC234"]')).not.toBeNull();
-    expect(buttons(known)).toEqual(["Join", "Dani"]); // the other forms stay
-    const unknown = joinPage("ABC234", [dani]);
-    expect(text(unknown)).not.toContain("already in this house");
-    expect(doc(unknown).querySelector('a[href="/h/ABC234"]')).toBeNull();
-  });
-
-  it("escapes the name of a returning person", () => {
-    const html = joinPage("ABC234", [], undefined, { id: 9, name: "<b>x</b>" });
-    expect(doc(html).querySelector("strong b")).toBeNull();
+  it("escapes names", () => {
+    const html = joinPage("ABC234", [{ id: 9, name: "<b>x</b>" }]);
     expect(doc(html).querySelector("b")).toBeNull();
     expect(text(html)).toContain("<b>x</b>");
   });
+});
 
-  it("has no claim list for an empty house", () => {
-    expect(buttons(joinPage("ABC234", []))).toEqual(["Join"]);
+describe("joining as someone new", () => {
+  it("asks for the name alone, keeping what was typed after a mistake", () => {
+    const d = doc(newNamePage("ABC234", "<i>Pick a name</i>", "<b>Sam</b>"));
+    expect(d.querySelector("form")?.getAttribute("action")).toBe("/h/ABC234/new");
+    expect(d.querySelector<HTMLInputElement>('input[name="name"]')!.value).toBe("<b>Sam</b>");
+    expect(d.querySelector('input[name="pin"]')).toBeNull();
+    expect(d.querySelector("i")).toBeNull();
+    expect(d.querySelector('[role="alert"]')?.textContent).toBe("<i>Pick a name</i>");
+  });
+
+  it("then asks for a PIN, carrying the name", () => {
+    const d = doc(newPinPage("ABC234", "<b>Sam</b>"));
+    expect(d.querySelector("form")?.getAttribute("action")).toBe("/h/ABC234/join");
+    expect(d.querySelector<HTMLInputElement>('input[name="name"]')!.type).toBe("hidden");
+    expect(d.querySelector<HTMLInputElement>('input[name="name"]')!.value).toBe("<b>Sam</b>");
+    const pin = d.querySelector<HTMLInputElement>('input[name="pin"]')!;
+    expect([pin.getAttribute("inputmode"), pin.getAttribute("pattern"), pin.getAttribute("maxlength")]).toEqual(["numeric", "[0-9]{4}", "4"]);
+    expect(d.querySelector("b")).toBeNull();
+    expect(text(newPinPage("ABC234", "Sam"))).toContain("Choose a PIN, Sam");
+  });
+});
+
+describe("opening a name", () => {
+  it("asks for that name's PIN, with a way to reset it", () => {
+    const d = doc(pinPage("ABC234", dani, "That PIN isn't right. Try again."));
+    expect(d.querySelector("form")?.getAttribute("action")).toBe("/h/ABC234/as/1");
+    expect(text(pinPage("ABC234", dani))).toContain("Dani's PIN");
+    expect(d.querySelector('[role="alert"]')?.textContent).toBe("That PIN isn't right. Try again.");
+    expect(d.querySelector('a[href="/h/ABC234/reset/1"]')?.textContent).toBe("Forgot my PIN");
+    expect(d.querySelector('a[href="/h/ABC234/join"]')).not.toBeNull();
+  });
+
+  it("asks for the house code before a new PIN, then carries it", () => {
+    const first = doc(resetCodePage("ABC234", dani));
+    expect(first.querySelector("form")?.getAttribute("action")).toBe("/h/ABC234/reset/1");
+    expect(first.querySelector('input[name="code"]')).not.toBeNull();
+    expect(first.querySelector('input[name="pin"]')).toBeNull();
+    const second = doc(resetPinPage("ABC234", dani, "abc234"));
+    expect(second.querySelector<HTMLInputElement>('input[name="code"]')!.type).toBe("hidden");
+    expect(second.querySelector<HTMLInputElement>('input[name="code"]')!.value).toBe("abc234");
+    expect(second.querySelector('input[name="pin"]')).not.toBeNull();
+    expect(text(resetPinPage("ABC234", dani, "ABC234"))).toContain("Choose a new PIN, Dani");
   });
 });
 
 describe("home page", () => {
-  it("offers to start or join a house", () => {
-    expect(buttons(homePage())).toEqual(["Start a new house", "Join"]);
+  it("asks for a house code, with starting a house underneath", () => {
+    expect(buttons(homePage())).toEqual(["Go", "Start a new house"]);
   });
 
   it("lists your houses only when there are some, linking to each", () => {
@@ -348,7 +407,7 @@ describe("home page", () => {
       { code: "XYZ789", name: "Rafi" },
     ]);
     expect(text(html)).toContain("Your houses");
-    expect(doc(html).querySelector('a[href="/h/ABC234"]')?.textContent).toBe("ABC234");
+    expect(doc(html).querySelector('a[href="/h/ABC234"]')?.textContent).toContain("ABC234");
     expect(doc(html).querySelector('a[href="/h/XYZ789"]')).not.toBeNull();
     expect(text(html)).toContain("as Dani");
   });

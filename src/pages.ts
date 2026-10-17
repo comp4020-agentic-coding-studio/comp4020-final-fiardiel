@@ -6,7 +6,8 @@ export type Draft = { note: string; total: string; amounts: Record<number, strin
 
 export type Entry =
   | { kind: "bill"; id: number; paidBy: Person; note: string; shares: { person: Person; cents: number }[]; mine: boolean }
-  | { kind: "payment"; id: number; from: Person; to: Person; cents: number; toMe: boolean };
+  | { kind: "payment"; id: number; from: Person; to: Person; cents: number; toMe: boolean }
+  | { kind: "pin"; person: Person };
 
 export type HouseView = {
   code: string;
@@ -173,6 +174,41 @@ const STYLE = `
   .split label { margin: 0; font-size: 0.875rem; line-height: 1.4; color: var(--muted); }
   [role="alert"], [role="status"] { margin: 0 0 1rem; padding: 0.75rem 1rem; background: var(--card); border-left: 3px solid var(--accent); border-radius: 8px; }
 
+  /* Sign-in screens: one job each, centred, like picking a profile. The
+     coloured initials are the same ones people have on the house page. */
+  .solo { min-height: 70vh; display: flex; flex-direction: column; }
+  .solo .middle { flex: 1; display: flex; flex-direction: column; justify-content: center; align-items: center; text-align: center; width: 100%; max-width: 24rem; margin: 0 auto; }
+  .solo .middle form { max-width: 20rem; }
+  .solo .middle h1 { font-size: 1.75rem; margin: 0 0 1.5rem; }
+  .solo .middle h1.brand { font-size: 2.75rem; margin: 0 0 0.25rem; }
+  .solo .middle form { width: 100%; margin: 0; }
+  .solo .middle button { width: 100%; margin-top: 1rem; }
+  .solo .middle [role="alert"] { width: 100%; text-align: left; }
+  .solo .foot { margin: 1.5rem 0 0; text-align: center; }
+  .solo .foot a { font-weight: 650; text-decoration: none; }
+  .solo input { text-align: center; font-size: 1.15rem; min-height: 3rem; background: var(--card); }
+  input.code { font: 700 1.4rem ui-monospace, Menlo, monospace; letter-spacing: 0.2em; text-transform: uppercase; }
+  input.pin { width: 11rem; margin: 0 auto; font: 700 1.75rem ui-monospace, Menlo, monospace; letter-spacing: 0.6em; text-indent: 0.6em; }
+  .tiles { display: flex; flex-wrap: wrap; gap: 1.5rem; justify-content: center; }
+  .tile { width: 6.5rem; }
+  .tile { display: flex; flex-direction: column; align-items: center; gap: 0.5rem; color: var(--ink); font-weight: 600; text-decoration: none; overflow-wrap: anywhere; }
+  .face { width: 5.5rem; height: 5.5rem; border-radius: 24px; background: var(--av); display: flex; align-items: center; justify-content: center; }
+  .face::before { content: attr(data-initial); color: #fff; font: 700 2.2rem/1 Georgia, serif; }
+  .middle > .face { margin-bottom: 1rem; }
+  .tile:hover .face, .tile:focus-visible .face { outline: 3px solid var(--accent); outline-offset: 3px; }
+  .tile small { margin-top: -0.375rem; color: var(--muted); font-weight: 400; font-size: 0.75rem; }
+  .tile.new .face { background: transparent; border: 2px dashed var(--muted); }
+  .tile.new .face::before { color: var(--muted); font: 400 2.2rem/1 system-ui, sans-serif; }
+  .houses { display: grid; gap: 0.75rem; width: 100%; margin: 1.25rem 0 0; }
+  .house { display: flex; align-items: center; gap: 0.875rem; padding: 0.875rem 1rem; background: var(--card); border: 1px solid var(--rule); border-radius: 18px; color: var(--ink); text-align: left; text-decoration: none; }
+  .house .face { width: 2.75rem; height: 2.75rem; border-radius: 14px; }
+  .house .face::before { font-size: 1.25rem; }
+  .house .code { display: block; font: 700 1rem ui-monospace, Menlo, monospace; letter-spacing: 0.08em; }
+  .house small { color: var(--muted); }
+  form.inline { display: inline; margin: 0; }
+  button.link { min-height: 0; padding: 0; background: none; color: var(--accent); font-weight: 650; }
+  #history > li.fact { color: var(--muted); font-size: 0.9rem; }
+
   /* Side by side once there is room; stacked on phones. */
   @media (min-width: 44rem) {
     main { max-width: 52rem; }
@@ -210,50 +246,123 @@ function postForm(action: string, fields: Record<string, string>, label: string,
 
 const alertLine = (message?: string): string => (message ? `<p role="alert">${esc(message)}</p>` : "");
 
-export function homePage(message?: string, mine: { code: string; name: string }[] = []): string {
-  const houses =
-    mine.length === 0
-      ? ""
-      : `
-      <h2>Your houses</h2>
-      <ul>${mine.map((h) => `<li><a href="/h/${esc(h.code)}">${esc(h.code)}</a> as <strong>${esc(h.name)}</strong></li>`).join("")}</ul>`;
+// A big coloured initial, the profile picture on the sign-in screens.
+function face(person: Person): string {
+  return `<span class="face" data-initial="${esc([...person.name][0] ?? "")}" style="--av: ${AVATARS[person.id % AVATARS.length]}"></span>`;
+}
+
+// Every sign-in screen: one job in the middle, a way back on top, and at most
+// one small link at the foot.
+function solo(title: string, middle: string, back?: { href: string; label: string }, foot = ""): string {
+  const top = back === undefined ? "" : `<p class="back"><a href="${esc(back.href)}">‹ ${esc(back.label)}</a></p>`;
   return layout(
-    "Serumah",
-    `      <h1>Serumah</h1>
-      <p>Split your house's bills and see who owes whom.</p>
-      <p class="quiet">Based on Serumah, the Telegram bot by <a href="https://github.com/davinpwk">davinpwk</a>.</p>
-      ${alertLine(message)}${houses}
-      <form method="post" action="/houses">
-        <button type="submit">Start a new house</button>
-      </form>
-      <form method="get" action="/join">
-        <label>House code <input name="code" required maxlength="12" autocomplete="off" autocapitalize="characters" /></label>
-        <button type="submit">Join</button>
-      </form>`,
+    title,
+    `      <div class="solo">${top}
+        <div class="middle">
+${middle}
+        </div>${foot === "" ? "" : `
+        <div class="foot">${foot}</div>`}
+      </div>`,
   );
 }
 
-export function joinPage(code: string, people: Person[], message?: string, current: Person | null = null): string {
-  const already =
-    current === null
-      ? ""
-      : `
-      <p>You're already in this house as <strong>${esc(current.name)}</strong>. <a href="/h/${esc(code)}">Go to your house</a></p>`;
-  const claims =
-    people.length === 0
-      ? ""
-      : `
-      <h2>Already here? That's me</h2>
-      ${people.map((p) => postForm(`/h/${code}/claim`, { person: String(p.id) }, p.name, "secondary")).join("\n      ")}`;
-  return layout(
-    "Join",
-    `      <h1>Join house ${esc(code)}</h1>
-      <p>Share this code with your housemates: <strong>${esc(code)}</strong></p>${already}
-      ${alertLine(message)}
-      <form method="post" action="/h/${esc(code)}/join">
-        <label>Your name <input name="name" required maxlength="${NAME_MAX}" autocomplete="off" /></label>
-        <button type="submit">Join</button>
-      </form>${claims}`,
+const PIN_INPUT = (label: string): string =>
+  `<input class="pin" name="pin" type="password" inputmode="numeric" pattern="[0-9]{4}" maxlength="4" minlength="4" required autocomplete="off" autofocus aria-label="${esc(label)}" />`;
+
+const CODE_INPUT = `<input class="code" name="code" required maxlength="12" autocomplete="off" autocapitalize="characters" placeholder="House code" aria-label="House code" autofocus />`;
+
+// Home asks for one thing, the code; a device that knows you shows its houses
+// instead. Starting a house is the small thing at the foot.
+export function homePage(message?: string, mine: { code: string; name: string }[] = []): string {
+  const middle =
+    mine.length === 0
+      ? `          <form method="get" action="/join">${CODE_INPUT}<button type="submit">Go</button></form>`
+      : `          <h2 class="sr">Your houses</h2>
+          <div class="houses">${mine.map((h) => `<a class="house" href="/h/${esc(h.code)}">${face({ id: 0, name: h.name })}<span><span class="code">${esc(h.code)}</span><small>as ${esc(h.name)}</small></span></a>`).join("")}</div>
+          <form method="get" action="/join" style="margin-top:1.25rem">${CODE_INPUT}<button type="submit" class="secondary">Go</button></form>`;
+  return solo(
+    "Serumah",
+    `          <h1 class="brand">Serumah</h1>
+          <p class="quiet">Your house's bills, split. Based on Serumah, the Telegram bot by <a href="https://github.com/davinpwk">davinpwk</a>.</p>
+          ${alertLine(message)}
+${middle}`,
+    undefined,
+    `<form class="inline" method="post" action="/houses"><button type="submit" class="link">Start a new house</button></form>`,
+  );
+}
+
+// "Who's using Serumah?": only the faces. This device's own name goes straight
+// to the house; anyone else's asks for their PIN.
+export function joinPage(code: string, people: Person[], current: Person | null = null): string {
+  const tile = (p: Person): string =>
+    current !== null && p.id === current.id
+      ? `<a class="tile" href="/h/${esc(code)}">${face(p)}<span class="name">${esc(p.name)}</span><small>this device</small></a>`
+      : `<a class="tile" href="/h/${esc(code)}/as/${p.id}">${face(p)}<span class="name">${esc(p.name)}</span></a>`;
+  return solo(
+    "Who's using Serumah?",
+    `          <h1>Who's using Serumah?</h1>
+          <div class="tiles">${people.map(tile).join("")}<a class="tile new" href="/h/${esc(code)}/new"><span class="face" data-initial="+"></span>New</a></div>`,
+    { href: "/", label: "Home" },
+    `<span class="quiet">House <strong>${esc(code)}</strong>. Share this code with your housemates.</span>`,
+  );
+}
+
+export function newNamePage(code: string, message?: string, name = ""): string {
+  return solo(
+    "Your name",
+    `          <h1>What's your name?</h1>
+          ${alertLine(message)}
+          <form method="post" action="/h/${esc(code)}/new"><input name="name" value="${esc(name)}" required maxlength="${NAME_MAX}" autocomplete="off" autofocus aria-label="Your name" /><button type="submit">Next</button></form>`,
+    { href: `/h/${code}/join`, label: "Back" },
+  );
+}
+
+export function newPinPage(code: string, name: string, message?: string): string {
+  return solo(
+    "Choose a PIN",
+    `          ${face({ id: 0, name })}
+          <h1>Choose a PIN, ${esc(name)}</h1>
+          ${alertLine(message)}
+          <form method="post" action="/h/${esc(code)}/join"><input type="hidden" name="name" value="${esc(name)}" />${PIN_INPUT("4-digit PIN")}<button type="submit">Join</button></form>`,
+    { href: `/h/${code}/new`, label: "Back" },
+    `<span class="quiet">You'll need it to open your name on another device.</span>`,
+  );
+}
+
+export function pinPage(code: string, person: Person, message?: string): string {
+  return solo(
+    `${person.name}'s PIN`,
+    `          ${face(person)}
+          <h1>${esc(person.name)}'s PIN</h1>
+          ${alertLine(message)}
+          <form method="post" action="/h/${esc(code)}/as/${person.id}">${PIN_INPUT(`${person.name}'s PIN`)}<button type="submit">Open</button></form>`,
+    { href: `/h/${code}/join`, label: `Not ${person.name}` },
+    `<a href="/h/${esc(code)}/reset/${person.id}">Forgot my PIN</a>`,
+  );
+}
+
+export function resetCodePage(code: string, person: Person, message?: string): string {
+  return solo(
+    "Forgot my PIN",
+    `          ${face(person)}
+          <h1>Type your house's code</h1>
+          ${alertLine(message)}
+          <form method="post" action="/h/${esc(code)}/reset/${person.id}">${CODE_INPUT}<button type="submit">Next</button></form>`,
+    { href: `/h/${code}/as/${person.id}`, label: "Back" },
+    `<span class="quiet">This shows the reset is on purpose.</span>`,
+  );
+}
+
+// The code typed on the step before rides along, so the server checks it again.
+export function resetPinPage(code: string, person: Person, typedCode: string, message?: string): string {
+  return solo(
+    "Choose a new PIN",
+    `          ${face(person)}
+          <h1>Choose a new PIN, ${esc(person.name)}</h1>
+          ${alertLine(message)}
+          <form method="post" action="/h/${esc(code)}/reset/${person.id}"><input type="hidden" name="code" value="${esc(typedCode)}" />${PIN_INPUT("New 4-digit PIN")}<button type="submit">Save PIN</button></form>`,
+    { href: `/h/${code}/reset/${person.id}`, label: "Back" },
+    `<span class="quiet">Your other devices will ask for it next time.</span>`,
   );
 }
 
@@ -325,6 +434,8 @@ const ICON_NOT_ARRIVED = `<svg viewBox="0 0 16 16" fill="none" stroke="currentCo
 // share chip is coloured by which way that money goes for them.
 function entryLine(entry: Entry, base: string, me: Person): string {
   const name = (p: Person): string => (p.id === me.id ? "You" : esc(p.name));
+  // A plain fact for the whole house, with no pill or colour.
+  if (entry.kind === "pin") return `<li class="fact">${esc(entry.person.name)}'s PIN was changed</li>`;
   if (entry.kind === "payment") {
     const what = `${name(entry.from)} paid ${entry.to.id === me.id ? "you" : esc(entry.to.name)}`;
     // Only the receiver can see whether the money arrived, so only they can say it didn't.

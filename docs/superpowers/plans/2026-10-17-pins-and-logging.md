@@ -231,4 +231,11 @@ And in `spec/unit/pages.test.ts`: a history with `{ kind: "pin", person: { id: 1
 
 ## Approved design
 
-(filled in at the end of Task 1)
+Approved by Rafi on 2026-10-17 (second mockup; the first was "too crowded"):
+one purpose per screen, centred, like picking a Netflix profile.
+
+- Home: "Serumah", one house-code box and Go; "Start a new house" is a small link at the foot. A device that knows you shows its houses as cards.
+- Who's using Serumah?: only the faces (big coloured initials) and a dashed "+ New" tile. This device's own face says "this device" and opens the house.
+- New: "What's your name?" alone, then "Choose a PIN, <name>" alone.
+- A face: "<name>'s PIN" and Open; "Forgot my PIN" at the foot.
+- Forgot my PIN: "Type your house's code" alone, then "Choose a new PIN, <name>"; the house page then shows "<name>'s PIN was changed".

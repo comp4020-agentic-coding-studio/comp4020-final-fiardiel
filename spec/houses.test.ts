@@ -1,6 +1,20 @@
 import { JSDOM } from "jsdom";
 import { describe, expect, it } from "vitest";
-import { addBill, buttonsOf, cookieOf, historyOf, housePage, joinAs, newHouse, personIdOf, post, send, textOf } from "./helpers.ts";
+import {
+  addBill,
+  cookieOf,
+  historyOf,
+  housePage,
+  joinAs,
+  newHouse,
+  personIdOf,
+  post,
+  send,
+  setUpHouse,
+  signInAs,
+  textOf,
+  tilesOf,
+} from "./helpers.ts";
 
 const link = (html: string, href: string): Element | null =>
   new JSDOM(html).window.document.querySelector(`a[href="${href}"]`);
@@ -105,33 +119,17 @@ describe("being someone in a house", () => {
     expect(historyOf(later)).toEqual([{ pill: "Bill", what: "Rice", total: "$5.00", by: "You paid", chips: ["You $5.00"] }]);
   });
 
-  it("recognises a returning person on the join page, but not a stranger", async () => {
+  it("sends this device's own tile straight to the house, but not a stranger's", async () => {
     const code = await newHouse();
     const cookie = await joinAs(code, "Dani");
     const known = await (await send(`/h/${code}/join`, { cookie })).text();
-    expect(textOf(known)).toContain("already in this house as Dani");
-    expect(link(known, `/h/${code}`)).not.toBeNull();
-    const stranger = await (await send(`/h/${code}/join`)).text();
-    expect(textOf(stranger)).not.toContain("already in this house as");
-    const garbage = await (await send(`/h/${code}/join`, { cookie: `person_${code}=nonsense` })).text();
-    expect(textOf(garbage)).not.toContain("already in this house as");
-  });
-
-  it("keeps the already-in-this-house banner on the join page's error answers", async () => {
-    const code = await newHouse();
-    const cookie = await joinAs(code, "Dani");
-
-    const invalid = await send(`/h/${code}/join`, { cookie, form: { name: "   " } });
-    expect(invalid.status).toBe(400);
-    expect(textOf(await invalid.text())).toContain("already in this house as Dani");
-
-    const taken = await send(`/h/${code}/join`, { cookie, form: { name: "dani" } });
-    expect(taken.status).toBe(409);
-    expect(textOf(await taken.text())).toContain("already in this house as Dani");
-
-    const stranger = await send(`/h/${code}/join`, { form: { name: "   " } });
-    expect(stranger.status).toBe(400);
-    expect(textOf(await stranger.text())).not.toContain("already in this house");
+    expect(link(known, `/h/${code}`)?.textContent).toContain("Dani");
+    expect(textOf(known)).toContain("this device");
+    for (const other of [undefined, `person_${code}=nonsense`]) {
+      const html = await (await send(`/h/${code}/join`, { cookie: other })).text();
+      expect(link(html, `/h/${code}`), String(other)).toBeNull();
+      expect(textOf(html)).not.toContain("this device");
+    }
   });
 
   it("lists your houses on the home page, and none for a stranger or a garbage cookie", async () => {
@@ -165,36 +163,30 @@ describe("being someone in a house", () => {
   it("tells a second person their name is taken, whatever its case", async () => {
     const code = await newHouse();
     await joinAs(code, "Dani");
-    const res = await send(`/h/${code}/join`, { form: { name: "dani" } });
-    expect(res.status).toBe(409);
-    const html = await res.text();
-    expect(textOf(html)).toContain("That name is taken");
-    expect(buttonsOf(html)).toContain("Dani");
-  });
-
-  it("lets someone claim an existing name from a new device", async () => {
-    const code = await newHouse();
-    await joinAs(code, "Dani");
-    const claim = await send(`/h/${code}/claim`, { form: { person: await personIdOf(code, "Dani") } });
-    expect(claim.status).toBe(303);
-    expect(textOf(await housePage(code, cookieOf(claim)))).toContain("you are Dani");
-  });
-
-  it("rejects a claim for a person who is not in this house", async () => {
-    const a = await newHouse();
-    const b = await newHouse();
-    await joinAs(a, "Dani");
-    const id = await personIdOf(a, "Dani");
-    for (const person of [id, "9999999", "abc", ""]) {
-      const res = await send(`/h/${b}/claim`, { form: { person } });
-      expect(res.status, JSON.stringify(person)).toBe(400);
+    for (const res of [
+      await send(`/h/${code}/new`, { form: { name: "dani" } }),
+      await send(`/h/${code}/join`, { form: { name: "dani", pin: "1234" } }),
+    ]) {
+      expect(res.status).toBe(409);
+      expect(textOf(await res.text())).toContain("That name is taken");
     }
+  });
+
+  it("asks for the name, then a PIN, carrying the name across", async () => {
+    const code = await newHouse();
+    const res = await send(`/h/${code}/new`, { form: { name: "  Sam  " } });
+    expect(res.status).toBe(200);
+    const html = await res.text();
+    expect(textOf(html)).toContain("Choose a PIN, Sam");
+    const name = new JSDOM(html).window.document.querySelector<HTMLInputElement>('input[name="name"]');
+    expect(name?.value).toBe("Sam");
+    expect(await personIdOf(code, "Sam").catch(() => null)).toBeNull();
   });
 
   it("rejects bad names with a clear message", async () => {
     const code = await newHouse();
     for (const name of ["", "   ", "x".repeat(25), "bad\u0007name"]) {
-      const res = await send(`/h/${code}/join`, { form: { name } });
+      const res = await send(`/h/${code}/new`, { form: { name } });
       expect(res.status, JSON.stringify(name)).toBe(400);
       expect(textOf(await res.text())).toContain("Pick a name");
     }
@@ -232,7 +224,7 @@ describe("being someone in a house", () => {
     expect(textOf(houseHtml)).toContain(`<b>x</b> Da"ni'`);
     const joinHtml = await (await send(`/h/${code}/join`)).text();
     expect(joinHtml).not.toContain("<b>x</b>");
-    expect(buttonsOf(joinHtml)).toContain(`<b>x</b> Da"ni'`);
+    expect(tilesOf(joinHtml)).toContain(`<b>x</b> Da"ni'`);
   });
 
   it("does not let a person from one house act in another", async () => {
@@ -242,5 +234,86 @@ describe("being someone in a house", () => {
     const res = await post(`/h/${b}/bill`, cookie, { note: "x", intent: "add" });
     expect(res.status).toBe(303);
     expect(res.headers.get("location")).toBe(`/h/${b}/join`);
+  });
+});
+
+describe("PINs", () => {
+  it("asks for a 4-digit PIN when joining", async () => {
+    const code = await newHouse();
+    for (const pin of ["", "12", "12345", "abcd", " 1234", "١٢٣٤"]) {
+      const res = await send(`/h/${code}/join`, { form: { name: "Dani", pin } });
+      expect(res.status, pin).toBe(400);
+      expect(textOf(await res.text())).toContain("Pick a 4-digit PIN");
+    }
+    expect(await personIdOf(code, "Dani").catch(() => null)).toBeNull();
+  });
+
+  it("opens a name on a new device only with its PIN", async () => {
+    const code = await newHouse();
+    await joinAs(code, "Dani", "0427");
+    const id = await personIdOf(code, "Dani");
+    expect(textOf(await (await send(`/h/${code}/as/${id}`)).text())).toContain("Dani's PIN");
+    const wrong = await signInAs(code, id, "1111");
+    expect(wrong.status).toBe(401);
+    expect(wrong.headers.getSetCookie()).toEqual([]);
+    expect(textOf(await wrong.text())).toContain("That PIN isn't right");
+    const right = await signInAs(code, id, "0427");
+    expect(right.status).toBe(303);
+    expect(textOf(await housePage(code, cookieOf(right)))).toContain("you are Dani");
+  });
+
+  it("won't show or open a person from another house, or no one", async () => {
+    const a = await newHouse();
+    const b = await newHouse();
+    await joinAs(a, "Dani");
+    const id = await personIdOf(a, "Dani");
+    for (const [code, who] of [[b, id], [a, "9999999"]]) {
+      expect((await send(`/h/${code}/as/${who}`)).status).toBe(404);
+      expect((await signInAs(code, who, "1234")).status).toBe(404);
+      expect((await send(`/h/${code}/reset/${who}`)).status).toBe(404);
+      expect((await send(`/h/${code}/reset/${who}`, { form: { code, pin: "5678" } })).status).toBe(404);
+    }
+    expect((await signInAs(a, id, "1234")).status).toBe(303);
+  });
+
+  it("only takes a person id on the PIN and reset pages", async () => {
+    const { code, ids } = await setUpHouse("Dani");
+    expect((await send(`/h/${code}/as`)).status).toBe(404);
+    expect((await send(`/h/${code}/history/${ids.Dani}`)).status).toBe(404);
+    // The old open claim is gone: posting to it signs nobody in.
+    const claim = await send(`/h/${code}/claim`, { form: { person: ids.Dani } });
+    expect(claim.headers.getSetCookie()).toEqual([]);
+    expect(claim.headers.get("location")).toBe(`/h/${code}/join`);
+  });
+
+  it("resets a PIN with the house code typed loosely, signs the old device out, and tells the house", async () => {
+    const { code, cookies, ids } = await setUpHouse("Ana", "Dani");
+    const loose = `${code.slice(0, 3).toLowerCase()} ${code.slice(3)}`;
+    const step = await send(`/h/${code}/reset/${ids.Dani}`, { form: { code: loose } });
+    expect(step.status).toBe(200);
+    expect(textOf(await step.text())).toContain("Choose a new PIN, Dani");
+    const reset = await send(`/h/${code}/reset/${ids.Dani}`, { form: { code: loose, pin: "5678" } });
+    expect(reset.status).toBe(303);
+    expect(reset.headers.get("location")).toBe(`/h/${code}`);
+    const old = await send(`/h/${code}`, { cookie: cookies.Dani });
+    expect(old.headers.get("location")).toBe(`/h/${code}/join`);
+    expect(textOf(await housePage(code, cookieOf(reset)))).toContain("you are Dani");
+    expect(textOf(await housePage(code, cookies.Ana))).toContain("Dani's PIN was changed");
+    expect((await signInAs(code, ids.Dani, "1234")).status).toBe(401);
+    expect((await signInAs(code, ids.Dani, "5678")).status).toBe(303);
+  });
+
+  it("refuses a reset with the wrong house code or a bad PIN, and keeps the PIN", async () => {
+    const { code, ids } = await setUpHouse("Dani");
+    const forms: Record<string, string>[] = [{ code: "ZZZZZZ" }, { code: "ZZZZZZ", pin: "5678" }, { code: "", pin: "5678" }];
+    for (const form of forms) {
+      const res = await send(`/h/${code}/reset/${ids.Dani}`, { form });
+      expect(res.status, JSON.stringify(form)).toBe(400);
+      expect(textOf(await res.text())).toContain("That isn't this house's code");
+    }
+    const bad = await send(`/h/${code}/reset/${ids.Dani}`, { form: { code, pin: "56" } });
+    expect(bad.status).toBe(400);
+    expect(textOf(await bad.text())).toContain("Pick a 4-digit PIN");
+    expect((await signInAs(code, ids.Dani, "1234")).status).toBe(303);
   });
 });

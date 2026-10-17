@@ -70,7 +70,7 @@ describe("joining", () => {
   });
 
   it("reports an unknown house", () => {
-    expect(memory().join("ZZZZZZ", "Dani")).toEqual({ ok: false, reason: "no_house" });
+    expect(memory().join("ZZZZZZ", "Dani", "1234")).toEqual({ ok: false, reason: "no_house" });
   });
 });
 

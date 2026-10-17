@@ -3,10 +3,10 @@ import { describe, expect, it } from "vitest";
 import { buttonsOf, send, textOf } from "./helpers.ts";
 
 describe("the site", () => {
-  it("offers to start or join a house at /", async () => {
+  it("asks for a house code at /, with starting a house underneath", async () => {
     const res = await send("/");
     expect(res.status).toBe(200);
-    expect(buttonsOf(await res.text())).toEqual(["Start a new house", "Join"]);
+    expect(buttonsOf(await res.text())).toEqual(["Go", "Start a new house"]);
   });
 
   it("says plainly when there is nothing at an address", async () => {

@@ -27,10 +27,29 @@ The decision for Crit 9 is when a change counts. At first I chose that a payment
 - When I tried the app, someone who joined while a page was open didn't appear in that page's forms. Fixing it showed that joining didn't tell open pages anything at all; a check for that came first ([`7e36f9f`](https://github.com/comp4020-agentic-coding-studio/comp4020-final-fiardiel/commit/7e36f9f)).
 - When I asked the agent to write my README, it stopped and pointed to the rule in `CLAUDE.md` that the README is my writing. I chose to answer its questions and let it arrange my own words ([`488b1b1`](https://github.com/comp4020-agentic-coding-studio/comp4020-final-fiardiel/commit/488b1b1)).
 
+## Crit 10: telling people apart
+
+Crit 10 asked the app to tell people apart, check on the server what each person may change, and log who did what. The weak spot was the name list: anyone in the house could tap any name and become that person, so a housemate could add bills or dispute payments as someone else by accident.
+
+I brainstormed with the agent again before any code, and my answer changed several times:
+
+- **The model.** I first wanted a username and password, then an email reset, then a house account. I settled on a Netflix household: the house code is the household login, and each name is a profile with a required 4-digit PIN. A device that knows you opens straight in. This reverses my Crit 9 decision against a PIN, but not the trust: the PIN stops someone tapping the wrong name by accident, not housemates.
+- **Forgetting a PIN.** The agent suggested housemates reset each other's PINs. I turned that down, because asking a housemate brings back the awkwardness the app is for. Instead you retype the house code and choose a new PIN. The reset shows on the house page for everyone and signs out the person's other devices.
+- **Old data.** I chose to start fresh rather than migrate the Crit 8 and 9 people, who had no PIN. The app opens a new `serumah.db`; the old file stays on the volume.
+- **The screens.** The agent's first mockup was too crowded. I asked for one purpose per screen, like Netflix: only the faces, then the name, then the PIN.
+
+The agent wrote a design and a plan ([`338f74a`](https://github.com/comp4020-agentic-coding-studio/comp4020-final-fiardiel/commit/338f74a)), a fresh reviewer read the design before planning, and the agent built it task by task on a branch, each task starting with a failing check ([`636cd72`](https://github.com/comp4020-agentic-coding-studio/comp4020-final-fiardiel/commit/636cd72), [`4c2ec0b`](https://github.com/comp4020-agentic-coding-studio/comp4020-final-fiardiel/commit/4c2ec0b), [`417e3d8`](https://github.com/comp4020-agentic-coding-studio/comp4020-final-fiardiel/commit/417e3d8), [`3659b66`](https://github.com/comp4020-agentic-coding-studio/comp4020-final-fiardiel/commit/3659b66)). Every action now writes one log line saying which house, who and what.
+
+Where it was corrected:
+
+- The final reviewer found that the log couldn't say whose browser took over a name, and that Chrome could save one person's PIN and offer it on another's page. Both got a failing check, then the fix: sign-ins and resets log `by=` the browser's own person, and the PIN box is no longer a password field ([`e3315bc`](https://github.com/comp4020-agentic-coding-studio/comp4020-final-fiardiel/commit/e3315bc)).
+- Every log line started with the house code, and I narrate the logs on a projector at the crit. I chose to name a house in the logs by a label like `h12` instead ([`828b26d`](https://github.com/comp4020-agentic-coding-studio/comp4020-final-fiardiel/commit/828b26d)).
+- When I wrote the README section on getting in, the agent checked it against the app. My claim that the PIN protects a housemate's phone was wrong, because a phone already signed in opens straight in, so I narrowed it ([`3e9b478`](https://github.com/comp4020-agentic-coding-studio/comp4020-final-fiardiel/commit/3e9b478)).
+
 ## Stack
 
 One Node and TypeScript server, SQLite on the Fly volume, server-rendered HTML and no framework, as in Crit 8. The machine is small and the app is for one house, so I kept it to as little as possible. Live updates use server-sent events: the server only needs to tell open pages that something changed, and each page fetches itself again. Button presses stay ordinary form posts, so everything still works without JavaScript, just without the live part.
 
 ## What is not done
 
-Chores, reading receipts and editing a bill are not built yet. The page has no real design yet, so the three-second test in the README doesn't pass.
+Chores, reading receipts and editing a bill are not built yet.

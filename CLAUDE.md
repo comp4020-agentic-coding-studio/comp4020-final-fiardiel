@@ -8,7 +8,7 @@ These come from the argument in `README.md`. If a change would break one, stop a
 - **Let anyone act for the person concerned.** Only the payer deletes their bill; only the receiver disputes a payment.
 - **Get the money wrong.** Amounts are whole cents everywhere. An equal split adds up to its total exactly. Balances are worked out from the bills and received payments every time, never stored.
 - **Nag or shame.** No notifications, reminders, "overdue", rankings of who owes most, or emphasis on debts. Balances are plain facts in name order. What you're owed and what you owe may use the two house colours (ink blue and terracotta) so the direction reads at a glance, but never red or green, and never more size or weight on one side. Red is kept for the Delete button only, which warns about removing a bill, never about a debt. The app shows the state when someone looks.
-- **Require accounts or passwords.** A person is a name inside a house. The house code is the one shared secret.
+- **Require accounts, passwords or email.** A person is a name inside a house, with a 4-digit PIN that guards against using someone else's name by accident, not against housemates. The house code is the one shared secret; retyping it resets a PIN. PINs are never stored or logged in plain form.
 - **Show a name or any typed text as markup.** Everything another person typed is escaped in the page. Names are trimmed, length-limited, normalised, and refused when invisible.
 - **Let one house touch another.** Every read and write is scoped to the house code. A cookie works only in its own house.
 

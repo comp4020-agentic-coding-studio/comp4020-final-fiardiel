@@ -18,6 +18,14 @@ We are housemates and we trust each other. That's why there is no login, and it'
 
 I don't want to nag, or blame anyone for owing. My housemates are good people; they just shouldn't be confused about who to pay.
 
+## Getting in
+
+The house code gets you to the "Who's using Serumah?" screen, and then each name has a 4-digit PIN.
+
+I chose a PIN instead of a login because the main purpose of it is to stop someone from tapping the wrong user by accident, on a shared laptop or on a phone that isn't signed in as that person. There are still no usernames and passwords because this app was made for housemates, and we still trust each other. If you forget your PIN, you can just type in the house's code and then choose a new PIN. A PIN reset is never silent: the house page shows "<name>'s PIN was changed", and then the old devices are signed out. PIN changes are shown to everyone in the history, so that we can see if there are mistaken PIN changes.
+
+I still left out usernames and passwords, email reset, and lockout after wrong PINs. I left out usernames and passwords for the same reason as last time: we trust each other, and we trust that everyone's good people. Email reset requires third-party services, so it is left out. Lockout after wrong PINs is just annoying, as we can forget our PINs, and because of our policy of trusting each other.
+
 ## What I chose not to build
 
 **Not built yet, because of time:**

@@ -366,6 +366,9 @@ describe("joining as someone new", () => {
     expect(d.querySelector<HTMLInputElement>('input[name="name"]')!.value).toBe("<b>Sam</b>");
     const pin = d.querySelector<HTMLInputElement>('input[name="pin"]')!;
     expect([pin.getAttribute("inputmode"), pin.getAttribute("pattern"), pin.getAttribute("maxlength")]).toEqual(["numeric", "[0-9]{4}", "4"]);
+    // A browser must not save one person's PIN and offer it on another's page.
+    expect(pin.getAttribute("autocomplete")).toBe("one-time-code");
+    expect(pin.type).not.toBe("password");
     expect(d.querySelector("b")).toBeNull();
     expect(text(newPinPage("ABC234", "Sam"))).toContain("Choose a PIN, Sam");
   });

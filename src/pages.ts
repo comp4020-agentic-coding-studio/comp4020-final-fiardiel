@@ -188,7 +188,7 @@ const STYLE = `
   .solo .foot a { font-weight: 650; text-decoration: none; }
   .solo input { text-align: center; font-size: 1.15rem; min-height: 3rem; background: var(--card); }
   input.code { font: 700 1.4rem ui-monospace, Menlo, monospace; letter-spacing: 0.2em; text-transform: uppercase; }
-  input.pin { width: 11rem; margin: 0 auto; font: 700 1.75rem ui-monospace, Menlo, monospace; letter-spacing: 0.6em; text-indent: 0.6em; }
+  input.pin { -webkit-text-security: disc; width: 11rem; margin: 0 auto; font: 700 1.75rem ui-monospace, Menlo, monospace; letter-spacing: 0.6em; text-indent: 0.6em; }
   .tiles { display: flex; flex-wrap: wrap; gap: 1.5rem; justify-content: center; }
   .tile { width: 6.5rem; }
   .tile { display: flex; flex-direction: column; align-items: center; gap: 0.5rem; color: var(--ink); font-weight: 600; text-decoration: none; overflow-wrap: anywhere; }
@@ -266,8 +266,11 @@ ${middle}
   );
 }
 
+// Not a password field: a browser would save one person's PIN and offer it on
+// another person's page, the very accident PINs are for. The digits are hidden
+// with the text-security mask instead.
 const PIN_INPUT = (label: string): string =>
-  `<input class="pin" name="pin" type="password" inputmode="numeric" pattern="[0-9]{4}" maxlength="4" minlength="4" required autocomplete="off" autofocus aria-label="${esc(label)}" />`;
+  `<input class="pin" name="pin" inputmode="numeric" pattern="[0-9]{4}" maxlength="4" minlength="4" required autocomplete="one-time-code" autofocus aria-label="${esc(label)}" />`;
 
 const CODE_INPUT = `<input class="code" name="code" required maxlength="12" autocomplete="off" autocapitalize="characters" placeholder="House code" aria-label="House code" autofocus />`;
 

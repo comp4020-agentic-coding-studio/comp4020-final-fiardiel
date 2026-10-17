@@ -380,15 +380,17 @@ async function person(
 ): Promise<void> {
   const who = store.person(code, id);
   if (who === null) return notFound(res);
+  // Whoever this browser already is in this house, if anyone.
+  const by = store.personByToken(code, readCookie(req, cookieName(code)) ?? "");
 
   if (action === "as" && method === "GET") return sendHtml(res, 200, pinPage(code, who));
   if (action === "as" && method === "POST") {
     const outcome = store.signIn(code, id, (await readForm(req)).get("pin") ?? "");
     if (!outcome.ok) {
-      logAction(code, who, "wrong_pin");
+      logAction(code, who, "wrong_pin", {}, by);
       return sendHtml(res, 401, pinPage(code, who, "That PIN isn't right. Try again."));
     }
-    logAction(code, who, "sign_in");
+    logAction(code, who, "sign_in", {}, by);
     return redirect(res, `/h/${code}`, cookieFor(req, code, outcome.token));
   }
 
@@ -398,13 +400,13 @@ async function person(
     const form = await readForm(req);
     const typed = form.get("code") ?? "";
     if (typedCode(typed) !== code) {
-      logAction(code, who, "wrong_code");
+      logAction(code, who, "wrong_code", {}, by);
       return sendHtml(res, 400, resetCodePage(code, who, "That isn't this house's code. Check it and try again."));
     }
     if (!form.has("pin")) return sendHtml(res, 200, resetPinPage(code, who, typed));
     const reset = store.resetPin(code, id, form.get("pin") ?? "");
     if (reset === null) return sendHtml(res, 400, resetPinPage(code, who, typed, BAD_PIN));
-    logAction(code, who, "reset_pin");
+    logAction(code, who, "reset_pin", {}, by);
     hub.broadcast(code);
     return redirect(res, `/h/${code}`, cookieFor(req, code, reset.token));
   }

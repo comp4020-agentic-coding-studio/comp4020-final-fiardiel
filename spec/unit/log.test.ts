@@ -16,4 +16,10 @@ describe("logLine", () => {
   it("logs someone not yet in the house", () => {
     expect(logLine("K7P2QX", null, "create_house")).toBe("house=K7P2QX person=- action=create_house");
   });
+
+  it("names the device that acted on someone else's name", () => {
+    const line = logLine("K7P2QX", { id: 1, name: "Ana" }, "reset_pin", {}, { id: 2, name: "Bo" });
+    expect(line).toBe('house=K7P2QX person="Ana"#1 action=reset_pin by="Bo"#2');
+    expect(logLine("K7P2QX", { id: 1, name: "Ana" }, "sign_in", {}, null)).toBe('house=K7P2QX person="Ana"#1 action=sign_in by=-');
+  });
 });

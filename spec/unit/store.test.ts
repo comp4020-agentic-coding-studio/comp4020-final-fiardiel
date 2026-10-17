@@ -15,7 +15,7 @@ afterEach(() => {
 });
 
 function joinOk(store: Store, code: string, name: string) {
-  const outcome = store.join(code, name);
+  const outcome = store.join(code, name, "1234");
   if (!outcome.ok) throw new Error(`join failed: ${outcome.reason}`);
   return outcome;
 }
@@ -41,7 +41,7 @@ describe("joining", () => {
     const store = memory();
     const code = store.createHouse();
     for (const name of ["", "   ", "x".repeat(25), "bad\u0007name"]) {
-      expect(store.join(code, name), JSON.stringify(name)).toEqual({ ok: false, reason: "invalid_name" });
+      expect(store.join(code, name, "1234"), JSON.stringify(name)).toEqual({ ok: false, reason: "invalid_name" });
     }
   });
 
@@ -50,23 +50,23 @@ describe("joining", () => {
     const a = store.createHouse();
     const b = store.createHouse();
     joinOk(store, a, "Dani");
-    expect(store.join(a, "dani")).toEqual({ ok: false, reason: "name_taken" });
-    expect(store.join(b, "dani").ok).toBe(true);
+    expect(store.join(a, "dani", "1234")).toEqual({ ok: false, reason: "name_taken" });
+    expect(store.join(b, "dani", "1234").ok).toBe(true);
   });
 
   it("treats look-alike names as taken: invisible characters and accent forms", () => {
     const store = memory();
     const code = store.createHouse();
     joinOk(store, code, "Dani");
-    expect(store.join(code, "Dani\u00ad")).toEqual({ ok: false, reason: "name_taken" });
+    expect(store.join(code, "Dani\u00ad", "1234")).toEqual({ ok: false, reason: "name_taken" });
     joinOk(store, code, "Am\u00e9");
-    expect(store.join(code, "Ame\u0301")).toEqual({ ok: false, reason: "name_taken" });
+    expect(store.join(code, "Ame\u0301", "1234")).toEqual({ ok: false, reason: "name_taken" });
   });
 
   it("rejects a name that is only an invisible character", () => {
     const store = memory();
     const code = store.createHouse();
-    expect(store.join(code, "\u200b")).toEqual({ ok: false, reason: "invalid_name" });
+    expect(store.join(code, "\u200b", "1234")).toEqual({ ok: false, reason: "invalid_name" });
   });
 
   it("reports an unknown house", () => {
@@ -86,14 +86,49 @@ describe("identity", () => {
     expect(store.personByToken(a, "")).toBeNull();
   });
 
-  it("lets someone claim an existing name, only within its house", () => {
+  it("refuses a join without a proper PIN, after checking the name", () => {
+    const store = memory();
+    const code = store.createHouse();
+    expect(store.join(code, "Dani", "12")).toEqual({ ok: false, reason: "invalid_pin" });
+    expect(store.join(code, "", "12")).toEqual({ ok: false, reason: "invalid_name" });
+    expect(store.people(code)).toEqual([]);
+  });
+
+  it("signs in with the right PIN only, and only in the person's own house", () => {
     const store = memory();
     const a = store.createHouse();
     const b = store.createHouse();
     const dani = joinOk(store, a, "Dani");
-    expect(store.claim(a, dani.person.id)).toEqual({ person: dani.person, token: dani.token });
-    expect(store.claim(b, dani.person.id)).toBeNull();
-    expect(store.claim(a, 9999)).toBeNull();
+    expect(store.signIn(a, dani.person.id, "1234")).toEqual({ ok: true, person: dani.person, token: dani.token });
+    expect(store.signIn(a, dani.person.id, "9999")).toEqual({ ok: false, reason: "wrong_pin" });
+    expect(store.signIn(b, dani.person.id, "1234")).toEqual({ ok: false, reason: "no_person" });
+    expect(store.signIn(a, 9999, "1234")).toEqual({ ok: false, reason: "no_person" });
+    expect(store.person(a, dani.person.id)).toEqual(dani.person);
+    expect(store.person(b, dani.person.id)).toBeNull();
+  });
+
+  it("a reset sets a new PIN, signs the old token out and is recorded", () => {
+    const store = memory();
+    const code = store.createHouse();
+    const dani = joinOk(store, code, "Dani");
+    const reset = store.resetPin(code, dani.person.id, "5678");
+    expect(reset?.person).toEqual(dani.person);
+    expect(reset?.token).not.toBe(dani.token);
+    expect(store.personByToken(code, dani.token)).toBeNull();
+    expect(store.signIn(code, dani.person.id, "1234")).toEqual({ ok: false, reason: "wrong_pin" });
+    expect(store.signIn(code, dani.person.id, "5678").ok).toBe(true);
+    expect(store.pinChanges(code)).toEqual([{ personId: dani.person.id, at: expect.any(Number) }]);
+  });
+
+  it("won't reset someone in another house, or to a malformed PIN", () => {
+    const store = memory();
+    const a = store.createHouse();
+    const b = store.createHouse();
+    const dani = joinOk(store, a, "Dani");
+    expect(store.resetPin(b, dani.person.id, "5678")).toBeNull();
+    expect(store.resetPin(a, dani.person.id, "56")).toBeNull();
+    expect(store.pinChanges(a)).toEqual([]);
+    expect(store.signIn(a, dani.person.id, "1234").ok).toBe(true);
   });
 
   it("lists the people in a house by name", () => {

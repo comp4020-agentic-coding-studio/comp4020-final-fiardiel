@@ -4,6 +4,7 @@ import { dirname } from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import { nameKey, normaliseName } from "./names.ts";
 import { MAX_CENTS } from "./money.ts";
+import { hashPin, isPin, pinMatches } from "./pins.ts";
 import type { BillRecord, PaymentRecord, PaymentStatus, Share } from "./money.ts";
 
 export type Person = { id: number; name: string };
@@ -11,7 +12,7 @@ export type Bill = BillRecord & { at: number };
 export type Payment = PaymentRecord & { at: number };
 export type JoinOutcome =
   | { ok: true; person: Person; token: string }
-  | { ok: false; reason: "no_house" | "invalid_name" | "name_taken" };
+  | { ok: false; reason: "no_house" | "invalid_name" | "invalid_pin" | "name_taken" };
 
 // No 0/O or 1/I, so a code read out loud or typed on a phone survives.
 const CODE_ALPHABET = "23456789ABCDEFGHJKLMNPQRSTUVWXYZ";
@@ -28,10 +29,15 @@ const SCHEMA = `
     name text not null,
     name_key text not null,
     token text not null unique,
+    pin_hash text not null,
     unique (house_code, name_key)
   );
-  drop table if exists cook_sessions;
-  drop table if exists kitchen_marks;
+  create table if not exists pin_changes (
+    id integer primary key autoincrement,
+    house_code text not null references houses(code),
+    person_id integer not null references people(id),
+    created_at integer not null
+  );
   create table if not exists bills (
     id integer primary key autoincrement,
     house_code text not null references houses(code),
@@ -96,27 +102,68 @@ export class Store {
     return code;
   }
 
-  join(code: string, rawName: string): JoinOutcome {
+  join(code: string, rawName: string, pin: string): JoinOutcome {
     if (!this.houseExists(code)) return { ok: false, reason: "no_house" };
     const name = normaliseName(rawName);
     if (name === null) return { ok: false, reason: "invalid_name" };
+    if (!isPin(pin)) return { ok: false, reason: "invalid_pin" };
     const key = nameKey(name);
     const taken = this.db.prepare("select 1 from people where house_code = ? and name_key = ?").get(code, key);
     if (taken !== undefined) return { ok: false, reason: "name_taken" };
     const token = randomBytes(24).toString("hex");
     const result = this.db
-      .prepare("insert into people (house_code, name, name_key, token) values (?, ?, ?, ?)")
-      .run(code, name, key, token);
+      .prepare("insert into people (house_code, name, name_key, token, pin_hash) values (?, ?, ?, ?, ?)")
+      .run(code, name, key, token, hashPin(pin));
     return { ok: true, person: { id: Number(result.lastInsertRowid), name }, token };
   }
 
-  // Taking over an existing name on a new device. The house code is the only
-  // secret, which the spec accepts for a house of housemates.
-  claim(code: string, personId: number): { person: Person; token: string } | null {
+  person(code: string, personId: number): Person | null {
+    const row = this.db.prepare("select id, name from people where id = ? and house_code = ?").get(personId, code) as
+      | PersonRow
+      | undefined;
+    return row === undefined ? null : { id: row.id, name: row.name };
+  }
+
+  // Opening an existing name on a new device takes its PIN. The token is
+  // handed over as it is, so the person's other devices stay signed in.
+  signIn(
+    code: string,
+    personId: number,
+    pin: string,
+  ): { ok: true; person: Person; token: string } | { ok: false; reason: "no_person" | "wrong_pin" } {
     const row = this.db
-      .prepare("select id, name, token from people where id = ? and house_code = ?")
-      .get(personId, code) as (PersonRow & { token: string }) | undefined;
-    return row === undefined ? null : { person: { id: row.id, name: row.name }, token: row.token };
+      .prepare("select id, name, token, pin_hash from people where id = ? and house_code = ?")
+      .get(personId, code) as (PersonRow & { token: string; pin_hash: string }) | undefined;
+    if (row === undefined) return { ok: false, reason: "no_person" };
+    if (!pinMatches(pin, row.pin_hash)) return { ok: false, reason: "wrong_pin" };
+    return { ok: true, person: { id: row.id, name: row.name }, token: row.token };
+  }
+
+  // A new PIN comes with a new token, so every device holding the old one is
+  // signed out, and the change is recorded for the house to see.
+  resetPin(code: string, personId: number, pin: string): { person: Person; token: string } | null {
+    const person = this.person(code, personId);
+    if (person === null || !isPin(pin)) return null;
+    const token = randomBytes(24).toString("hex");
+    this.db.exec("begin");
+    try {
+      this.db.prepare("update people set pin_hash = ?, token = ? where id = ?").run(hashPin(pin), token, personId);
+      this.db
+        .prepare("insert into pin_changes (house_code, person_id, created_at) values (?, ?, ?)")
+        .run(code, personId, this.now());
+      this.db.exec("commit");
+    } catch (error) {
+      this.db.exec("rollback");
+      throw error;
+    }
+    return { person, token };
+  }
+
+  pinChanges(code: string): { personId: number; at: number }[] {
+    const rows = this.db
+      .prepare("select person_id, created_at from pin_changes where house_code = ? order by created_at desc, id desc")
+      .all(code) as { person_id: number; created_at: number }[];
+    return rows.map((r) => ({ personId: r.person_id, at: r.created_at }));
   }
 
   personByToken(code: string, token: string): Person | null {

@@ -9,8 +9,8 @@ const requestedPort = Number(process.env.PORT);
 const port = Number.isInteger(requestedPort) && requestedPort > 0 && requestedPort < 65536 ? requestedPort : 8080;
 const dataDir = process.env.DATA_DIR ?? "data";
 
-// Still named kitchen.db so the houses and people made at Crit 8 carry over.
-const store = new Store(join(dataDir, "kitchen.db"));
+// A fresh file for PINs: the Crit 8 and 9 data in kitchen.db is left as it was.
+const store = new Store(join(dataDir, "serumah.db"));
 const hub = new Hub();
 const server = createServer({ connectionsCheckingInterval: 2000 }, createHandler(store, hub));
 // A request that has not fully arrived after this long is dropped. This covers the

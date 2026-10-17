@@ -69,6 +69,16 @@ describe("joining", () => {
     expect(store.join(code, "\u200b", "1234")).toEqual({ ok: false, reason: "invalid_name" });
   });
 
+  it("gives each house a log label that doesn't give away its code", () => {
+    const store = memory();
+    const a = store.createHouse();
+    const b = store.createHouse();
+    expect(store.houseLabel(a)).toMatch(/^h\d+$/);
+    expect(store.houseLabel(b)).not.toBe(store.houseLabel(a));
+    expect(store.houseLabel(a)).toBe(store.houseLabel(a));
+    expect(store.houseLabel("ZZZZZZ")).toBe("h?");
+  });
+
   it("reports an unknown house", () => {
     expect(memory().join("ZZZZZZ", "Dani", "1234")).toEqual({ ok: false, reason: "no_house" });
   });

@@ -55,7 +55,7 @@ narrate from.
    its details. Covered: create house, join, PIN sign-in, wrong PIN, PIN
    reset, first PIN set, add bill, delete bill (and refused delete), record
    payment, dispute (and refused dispute). Format:
-   `house=K7P2QX person="Dani"#3 action=add_bill bill=12 cents=4500`.
+   `house=h12 person="Dani"#3 action=add_bill bill=12 cents=4500`.
    A name or note cannot break the line or forge another field (quotes and
    newlines are escaped). The PIN itself is never logged.
 

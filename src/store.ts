@@ -89,6 +89,13 @@ export class Store {
     return this.lastAt;
   }
 
+  // The logs are read out on screen, so a house is named there by its row
+  // number, never by its code (the one shared secret).
+  houseLabel(code: string): string {
+    const row = this.db.prepare("select rowid from houses where code = ?").get(code) as { rowid: number } | undefined;
+    return row === undefined ? "h?" : `h${row.rowid}`;
+  }
+
   houseExists(code: string): boolean {
     return this.db.prepare("select 1 from houses where code = ?").get(code) !== undefined;
   }

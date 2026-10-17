@@ -16,7 +16,7 @@
 - No new dependency. PINs hashed with `node:crypto` `scrypt`, per-person random salt, compared with `timingSafeEqual`.
 - A PIN is exactly four ASCII digits `[0-9]{4}`. It is never stored or logged in plain form.
 - Database file is `join(dataDir, "serumah.db")`. `kitchen.db` is not opened, migrated or deleted.
-- Log lines go to stdout with `console.log`, one line each, format `house=<CODE> person="<name>"#<id> action=<action> [key=value ...]`; strings JSON-quoted, numbers bare, `person=-` when nobody is signed in.
+- Log lines go to stdout with `console.log`, one line each, format `house=<label like h12, never the code> person="<name>"#<id> action=<action> [key=value ...]`; strings JSON-quoted, numbers bare, `person=-` when nobody is signed in.
 - Copy: the history entry reads `<Name>'s PIN was changed`. No warning colour or emphasis.
 - No lockout after wrong PINs.
 - `README.md` and `reflections/` are Rafi's writing; do not edit them.

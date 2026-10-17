@@ -193,7 +193,7 @@ async function route(store: Store, hub: Hub, req: IncomingMessage, res: ServerRe
   }
   if (method === "POST" && path === "/houses") {
     const code = store.createHouse();
-    logAction(code, null, "create_house");
+    logAction(store.houseLabel(code), null, "create_house");
     return redirect(res, `/h/${code}/join`);
   }
   if (method === "GET" && path === "/join") {
@@ -249,7 +249,7 @@ async function house(
     const raw = form.get("name") ?? "";
     const outcome = store.join(code, raw, form.get("pin") ?? "");
     if (outcome.ok) {
-      logAction(code, outcome.person, "join");
+      logAction(store.houseLabel(code), outcome.person, "join");
       // Open pages show the newcomer.
       hub.broadcast(code);
       return redirect(res, `/h/${code}`, cookieFor(req, code, outcome.token));
@@ -313,7 +313,7 @@ async function house(
     if (shares.length === 0) return again("Put an amount next to at least one person.");
     const bill = store.addBill(code, me.id, note, shares);
     if (bill === null) throw new HttpError(400, "That bill couldn't be added.");
-    logAction(code, me, "add_bill", { bill, cents: shares.reduce((sum, s) => sum + s.cents, 0) });
+    logAction(store.houseLabel(code), me, "add_bill", { bill, cents: shares.reduce((sum, s) => sum + s.cents, 0) });
     hub.broadcast(code);
     return redirect(res, `/h/${code}`);
   }
@@ -325,10 +325,10 @@ async function house(
       return sendHtml(res, 404, housePage({ ...viewFor(store, code, me), notice: "That bill isn't here any more." }));
     }
     if (outcome === "not_yours") {
-      logAction(code, me, "delete_refused", { bill: id ?? 0 });
+      logAction(store.houseLabel(code), me, "delete_refused", { bill: id ?? 0 });
       throw new HttpError(403, "Only the person who paid can delete a bill.");
     }
-    logAction(code, me, "delete_bill", { bill: id ?? 0 });
+    logAction(store.houseLabel(code), me, "delete_bill", { bill: id ?? 0 });
     hub.broadcast(code);
     return redirect(res, `/h/${code}`);
   }
@@ -342,7 +342,7 @@ async function house(
     const to = idFrom(typed.to);
     const payment = to === null ? null : store.recordPayment(code, me.id, to, cents);
     if (to === null || payment === null) return again("Pick someone else in this house.");
-    logAction(code, me, "pay", { payment, to, cents });
+    logAction(store.houseLabel(code), me, "pay", { payment, to, cents });
     hub.broadcast(code);
     return redirect(res, `/h/${code}`);
   }
@@ -351,7 +351,7 @@ async function house(
     const outcome = id === null ? "gone" : store.disputePayment(code, id, me.id);
     if (outcome === "gone") throw new HttpError(404, "That payment isn't in this house.");
     if (outcome === "not_yours") {
-      logAction(code, me, "dispute_refused", { payment: id ?? 0 });
+      logAction(store.houseLabel(code), me, "dispute_refused", { payment: id ?? 0 });
       throw new HttpError(403, "Only the person who was paid can say it never arrived.");
     }
     // A second tap, or a second device, arrived after the first. Nothing
@@ -359,7 +359,7 @@ async function house(
     if (outcome === "already") {
       return sendHtml(res, 409, housePage({ ...viewFor(store, code, me), notice: "That payment was already removed." }));
     }
-    logAction(code, me, "dispute", { payment: id ?? 0 });
+    logAction(store.houseLabel(code), me, "dispute", { payment: id ?? 0 });
     hub.broadcast(code);
     return redirect(res, `/h/${code}`);
   }
@@ -387,10 +387,10 @@ async function person(
   if (action === "as" && method === "POST") {
     const outcome = store.signIn(code, id, (await readForm(req)).get("pin") ?? "");
     if (!outcome.ok) {
-      logAction(code, who, "wrong_pin", {}, by);
+      logAction(store.houseLabel(code), who, "wrong_pin", {}, by);
       return sendHtml(res, 401, pinPage(code, who, "That PIN isn't right. Try again."));
     }
-    logAction(code, who, "sign_in", {}, by);
+    logAction(store.houseLabel(code), who, "sign_in", {}, by);
     return redirect(res, `/h/${code}`, cookieFor(req, code, outcome.token));
   }
 
@@ -400,13 +400,13 @@ async function person(
     const form = await readForm(req);
     const typed = form.get("code") ?? "";
     if (typedCode(typed) !== code) {
-      logAction(code, who, "wrong_code", {}, by);
+      logAction(store.houseLabel(code), who, "wrong_code", {}, by);
       return sendHtml(res, 400, resetCodePage(code, who, "That isn't this house's code. Check it and try again."));
     }
     if (!form.has("pin")) return sendHtml(res, 200, resetPinPage(code, who, typed));
     const reset = store.resetPin(code, id, form.get("pin") ?? "");
     if (reset === null) return sendHtml(res, 400, resetPinPage(code, who, typed, BAD_PIN));
-    logAction(code, who, "reset_pin", {}, by);
+    logAction(store.houseLabel(code), who, "reset_pin", {}, by);
     hub.broadcast(code);
     return redirect(res, `/h/${code}`, cookieFor(req, code, reset.token));
   }

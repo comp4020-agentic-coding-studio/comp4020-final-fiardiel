@@ -36,9 +36,12 @@ const typedCode = (raw: string | null): string => (raw ?? "").replace(/\s+/g, ""
 
 export class HttpError extends Error {
   status: number;
-  constructor(status: number, message: string) {
+  // True when the refusal already has its own, more specific log line.
+  logged: boolean;
+  constructor(status: number, message: string, logged = false) {
     super(message);
     this.status = status;
+    this.logged = logged;
   }
 }
 
@@ -179,7 +182,9 @@ export function createHandler(store: Store, hub: Hub) {
         // Every refusal is logged, with the house and person when the address and cookie say.
         const code = req.url?.match(/^\/h\/([23456789A-HJ-NP-Z]{6})(?:[/?]|$)/)?.[1];
         const who = code === undefined ? null : store.personByToken(code, readCookie(req, cookieName(code)) ?? "");
-        logAction(code === undefined ? "-" : store.houseLabel(code), who, "rejected", { status: error.status, reason: error.message });
+        if (!error.logged) {
+          logAction(code === undefined ? "-" : store.houseLabel(code), who, "rejected", { status: error.status, reason: error.message });
+        }
         res.setHeader("connection", "close");
         sendHtml(res, error.status, messagePage("That didn't work", error.message));
         return;
@@ -357,7 +362,7 @@ async function house(
     }
     if (outcome === "not_yours") {
       logAction(store.houseLabel(code), me, "delete_refused", { bill: id ?? 0 });
-      throw new HttpError(403, "Only the person who paid can delete a bill.");
+      throw new HttpError(403, "Only the person who paid can delete a bill.", true);
     }
     logAction(store.houseLabel(code), me, "delete_bill", { bill: id ?? 0 });
     broadcast(store, hub, code);
@@ -386,7 +391,7 @@ async function house(
     if (outcome === "gone") throw new HttpError(404, "That payment isn't in this house.");
     if (outcome === "not_yours") {
       logAction(store.houseLabel(code), me, "dispute_refused", { payment: id ?? 0 });
-      throw new HttpError(403, "Only the person who was paid can say it never arrived.");
+      throw new HttpError(403, "Only the person who was paid can say it never arrived.", true);
     }
     // A second tap, or a second device, arrived after the first. Nothing
     // changes; the person sees the house as it now stands.

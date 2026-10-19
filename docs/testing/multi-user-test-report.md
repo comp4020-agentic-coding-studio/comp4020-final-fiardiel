@@ -8,6 +8,20 @@ Scenarios c, f, g and h were scripted with `curl`, each person with their own co
 
 ## What the log says
 
+**After the test the log was rewritten as plain sentences**, so it reads aloud at a glance. The excerpts below are in the format used during the test. The same events now read:
+
+```
+[h3] "Rafi Ardiel Erinaldi" (#6) joined
+[h3] told 1 open page to refresh
+[h3] "Rafi Ardiel Erinaldi" (#6) added bill #3 for $20.00
+[h3] "Benedict Siregar" (#7) was sent the latest house
+[h3] "Benedict Siregar" (#7) left the house page (1 page still open)
+[h1] "Ana" (#1) had their PIN reset, from "Bo" (#2)'s browser
+[h4] REFUSED "Cara" (#9): That bill isn't here any more. (404)
+```
+
+The format used during the test:
+
 Every line is one event: `house=<label> person="<name>"#<id> action=<event> [details]`.
 
 | The crit's list | Serumah's log |

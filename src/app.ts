@@ -376,7 +376,7 @@ async function house(
     const to = idFrom(typed.to);
     const payment = to === null ? null : store.recordPayment(code, me.id, to, cents);
     if (to === null || payment === null) return again("Pick someone else in this house.");
-    logAction(store.houseLabel(code), me, "pay", { payment, to, cents });
+    logAction(store.houseLabel(code), me, "pay", { payment, to: store.person(code, to)?.name ?? "someone", cents });
     broadcast(store, hub, code);
     return redirect(res, `/h/${code}`);
   }

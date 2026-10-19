@@ -158,6 +158,12 @@ function idFrom(raw: string | null): number | null {
   return raw !== null && raw.trim() !== "" && Number.isInteger(id) && id > 0 ? id : null;
 }
 
+// Tells every open page in the house that something changed, and logs how many heard it.
+function broadcast(store: Store, hub: Hub, code: string): void {
+  hub.broadcast(code);
+  logAction(store.houseLabel(code), null, "broadcast", { clients: hub.count(code) });
+}
+
 export function createHandler(store: Store, hub: Hub) {
   return async (req: IncomingMessage, res: ServerResponse): Promise<void> => {
     try {
@@ -170,6 +176,10 @@ export function createHandler(store: Store, hub: Hub) {
         return;
       }
       if (error instanceof HttpError) {
+        // Every refusal is logged, with the house and person when the address and cookie say.
+        const code = req.url?.match(/^\/h\/([23456789A-HJ-NP-Z]{6})(?:[/?]|$)/)?.[1];
+        const who = code === undefined ? null : store.personByToken(code, readCookie(req, cookieName(code)) ?? "");
+        logAction(code === undefined ? "-" : store.houseLabel(code), who, "rejected", { status: error.status, reason: error.message });
         res.setHeader("connection", "close");
         sendHtml(res, error.status, messagePage("That didn't work", error.message));
         return;
@@ -251,7 +261,7 @@ async function house(
     if (outcome.ok) {
       logAction(store.houseLabel(code), outcome.person, "join");
       // Open pages show the newcomer.
-      hub.broadcast(code);
+      broadcast(store, hub, code);
       return redirect(res, `/h/${code}`, cookieFor(req, code, outcome.token));
     }
     if (outcome.reason === "invalid_pin") return sendHtml(res, 400, newPinPage(code, normaliseName(raw) ?? raw, BAD_PIN));
@@ -266,12 +276,24 @@ async function house(
   if (me === null && action === "events") throw new HttpError(403, "Join this house to see it live.");
   if (me === null) return redirect(res, `/h/${code}/join`);
 
-  if (method === "GET" && action === "events") return hub.open(code, res);
+  const label = store.houseLabel(code);
+  if (method === "GET" && action === "events") {
+    hub.open(code, res);
+    logAction(label, me, "connect", { clients: hub.count(code) });
+    // The hub drops the stream on close first, so the count is what's left.
+    res.on("close", () => logAction(label, me, "disconnect", { clients: hub.count(code) }));
+    return;
+  }
 
+  // The house page, and every live refresh of it, is one person's snapshot of the house.
   if (method === "GET" && action === "") {
+    logAction(label, me, "snapshot", { page: "house" });
     return sendHtml(res, 200, housePage(viewFor(store, code, me)));
   }
-  if (method === "GET" && action === "history") return sendHtml(res, 200, historyPage(viewFor(store, code, me)));
+  if (method === "GET" && action === "history") {
+    logAction(label, me, "snapshot", { page: "history" });
+    return sendHtml(res, 200, historyPage(viewFor(store, code, me)));
+  }
   if (method === "GET" && action === "bill") return sendHtml(res, 200, billPage(viewFor(store, code, me)));
   if (method === "GET" && action === "pay") return sendHtml(res, 200, payPage(viewFor(store, code, me)));
   if (method === "POST" && action === "bill") {
@@ -283,8 +305,10 @@ async function house(
       amounts: Object.fromEntries(people.map((p) => [p.id, form.get(`amount_${p.id}`) ?? ""] as const)),
       ticked: people.filter((p) => form.has(`with_${p.id}`)).map((p) => p.id),
     };
-    const again = (message: string): void =>
+    const again = (message: string): void => {
+      logAction(label, me, "rejected", { status: 400, reason: message });
       sendHtml(res, 400, billPage(viewFor(store, code, me), { ...draft, message }));
+    };
     const note = normaliseNote(draft.note);
     if (note === null) return again(`Keep the note to ${NOTE_MAX} characters, without control characters.`);
 
@@ -314,7 +338,7 @@ async function house(
     const bill = store.addBill(code, me.id, note, shares);
     if (bill === null) throw new HttpError(400, "That bill couldn't be added.");
     logAction(store.houseLabel(code), me, "add_bill", { bill, cents: shares.reduce((sum, s) => sum + s.cents, 0) });
-    hub.broadcast(code);
+    broadcast(store, hub, code);
     return redirect(res, `/h/${code}`);
   }
   if (method === "POST" && action === "delete") {
@@ -322,6 +346,7 @@ async function house(
     const outcome = id === null ? "gone" : store.deleteBill(code, id, me.id);
     // Gone already, most likely a second tap: say so over the house as it now stands.
     if (outcome === "gone") {
+      logAction(label, me, "rejected", { status: 404, reason: "That bill isn't here any more." });
       return sendHtml(res, 404, housePage({ ...viewFor(store, code, me), notice: "That bill isn't here any more." }));
     }
     if (outcome === "not_yours") {
@@ -329,21 +354,24 @@ async function house(
       throw new HttpError(403, "Only the person who paid can delete a bill.");
     }
     logAction(store.houseLabel(code), me, "delete_bill", { bill: id ?? 0 });
-    hub.broadcast(code);
+    broadcast(store, hub, code);
     return redirect(res, `/h/${code}`);
   }
   if (method === "POST" && action === "pay") {
     const form = await readForm(req);
     const typed = { to: form.get("to") ?? "", amount: form.get("amount") ?? "" };
     // A mistake keeps what was typed, on the payment page.
-    const again = (message: string): void => sendHtml(res, 400, payPage(viewFor(store, code, me), { ...typed, message }));
+    const again = (message: string): void => {
+      logAction(label, me, "rejected", { status: 400, reason: message });
+      sendHtml(res, 400, payPage(viewFor(store, code, me), { ...typed, message }));
+    };
     const cents = parseCents(typed.amount);
     if (cents === null || cents === 0) return again("Type the amount in dollars, like 15.50.");
     const to = idFrom(typed.to);
     const payment = to === null ? null : store.recordPayment(code, me.id, to, cents);
     if (to === null || payment === null) return again("Pick someone else in this house.");
     logAction(store.houseLabel(code), me, "pay", { payment, to, cents });
-    hub.broadcast(code);
+    broadcast(store, hub, code);
     return redirect(res, `/h/${code}`);
   }
   if (method === "POST" && action === "dispute") {
@@ -357,10 +385,11 @@ async function house(
     // A second tap, or a second device, arrived after the first. Nothing
     // changes; the person sees the house as it now stands.
     if (outcome === "already") {
+      logAction(label, me, "rejected", { status: 409, reason: "That payment was already removed." });
       return sendHtml(res, 409, housePage({ ...viewFor(store, code, me), notice: "That payment was already removed." }));
     }
     logAction(store.houseLabel(code), me, "dispute", { payment: id ?? 0 });
-    hub.broadcast(code);
+    broadcast(store, hub, code);
     return redirect(res, `/h/${code}`);
   }
   return notFound(res);
@@ -407,7 +436,7 @@ async function person(
     const reset = store.resetPin(code, id, form.get("pin") ?? "");
     if (reset === null) return sendHtml(res, 400, resetPinPage(code, who, typed, BAD_PIN));
     logAction(store.houseLabel(code), who, "reset_pin", {}, by);
-    hub.broadcast(code);
+    broadcast(store, hub, code);
     return redirect(res, `/h/${code}`, cookieFor(req, code, reset.token));
   }
   return notFound(res);

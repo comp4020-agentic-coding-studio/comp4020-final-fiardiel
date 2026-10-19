@@ -93,10 +93,10 @@ After the test the second machine and its volume were destroyed by id; the app i
 
 Fly's proxy refused connections for about two seconds while the app started. The pages' own script restarts a dropped stream, waiting a little longer each time, which is why the pod's pages came back a few seconds after the server did.
 
-## Gaps the test found in the logs
+## Gaps the test found in the logs, and their fixes
 
-- **A request for an unknown house is not logged.** On machine 2 in scenario g, the 404s left no line, so the log alone could not show that machine 2 was turning people away.
-- **A restart logs no disconnects.** The server ends the open streams on shutdown and exits before their `disconnect` lines are written, so the count jumps from `clients=1` to a fresh start.
-- **Opening another house with your cookie is not logged.** In f it is a redirect to the join page, not a refusal.
+- **A request for an unknown house was not logged.** On machine 2 in scenario g, the 404s left no line. It now logs `house=- action=rejected status=404 reason="no house with that code"`; the typed code is left out, since a wrong one can be one letter off the real one.
+- **A restart logged no disconnects.** The server exited before the streams' `disconnect` lines reached the log. It now lets the process end by itself after closing, so the lines are written.
+- **Opening a house you aren't signed in to was not logged.** In f it was a quiet redirect. It now logs `action=rejected status=303 reason="not signed in to this house"`.
 
-None of these let anyone do something they shouldn't; they are places the log is quieter than the app.
+All three were checked against a local server (a stream open, then SIGTERM) before deploying. None of them let anyone do something they shouldn't; they were places the log was quieter than the app.

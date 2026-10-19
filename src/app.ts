@@ -209,6 +209,8 @@ async function route(store: Store, hub: Hub, req: IncomingMessage, res: ServerRe
   if (method === "GET" && path === "/join") {
     const code = typedCode(url.searchParams.get("code"));
     if (CODE_RE.test(code) && store.houseExists(code)) return redirect(res, `/h/${code}/join`);
+    // The typed code is never logged: a wrong one could be one letter off the real one.
+    logAction("-", null, "rejected", { status: 404, reason: "no house with that code" });
     return sendHtml(res, 404, homePage(NO_SUCH_HOUSE, myHouses(store, req)));
   }
 
@@ -225,6 +227,7 @@ async function route(store: Store, hub: Hub, req: IncomingMessage, res: ServerRe
     return redirect(res, rest === "" ? `/h/${upper}` : `/h/${upper}/${rest}`);
   }
   if (!CODE_RE.test(code) || !store.houseExists(code)) {
+    logAction("-", null, "rejected", { status: 404, reason: "no house with that code" });
     return sendHtml(res, 404, messagePage("No such house", NO_SUCH_HOUSE));
   }
   if (id !== undefined) return person(store, hub, req, res, code, method, action, Number(id));
@@ -274,7 +277,10 @@ async function house(
   // A browser's EventSource can't follow a redirect to a page, so the stream
   // refuses outright instead.
   if (me === null && action === "events") throw new HttpError(403, "Join this house to see it live.");
-  if (me === null) return redirect(res, `/h/${code}/join`);
+  if (me === null) {
+    logAction(store.houseLabel(code), null, "rejected", { status: 303, reason: "not signed in to this house" });
+    return redirect(res, `/h/${code}/join`);
+  }
 
   const label = store.houseLabel(code);
   if (method === "GET" && action === "events") {

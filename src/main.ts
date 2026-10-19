@@ -27,7 +27,9 @@ for (const signal of ["SIGINT", "SIGTERM"] as const) {
     hub.closeAll();
     server.close(() => {
       store.close();
-      process.exit(0);
+      // No process.exit: stdout to a pipe is written later, so exiting here
+      // would drop the last log lines (the streams' disconnects).
+      process.exitCode = 0;
     });
   });
 }

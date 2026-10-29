@@ -239,3 +239,33 @@ describe("the page without a cookie", () => {
     expect(res.headers.get("location")).toBe(`/h/${code}/join`);
   });
 });
+
+describe("bills split by item", () => {
+  it("works out each share from the items and ticks, not from amounts sent along, and shows the items in the history", async () => {
+    const { code, cookies, ids } = await setUpHouse("Rafi", "Dina", "Ari");
+    const res = await post(`/h/${code}/bill`, cookies.Rafi, {
+      note: "Coles",
+      intent: "add",
+      item_name_0: "Milk 2L",
+      item_price_0: "3.10",
+      [`item_0_with_${ids.Rafi}`]: "on",
+      [`item_0_with_${ids.Dina}`]: "on",
+      [`item_0_with_${ids.Ari}`]: "on",
+      item_name_1: "Kecap manis",
+      item_price_1: "5.20",
+      [`item_1_with_${ids.Rafi}`]: "on",
+      [`item_1_with_${ids.Dina}`]: "on",
+      item_name_2: "Plastic bag",
+      item_price_2: "0.15",
+      [`amount_${ids.Ari}`]: "50",
+    });
+    expect(res.status).toBe(303);
+    // Milk: 104 to the payer, 103 each; kecap: 260 each; the bag is ticked on nobody, so it's left out.
+    expect(balancesOf(await housePage(code, cookies.Rafi))).toEqual(["Ari owes you $1.03", "Dina owes you $3.63"]);
+    const [bill] = historyOf(await housePage(code, cookies.Dina));
+    expect(bill.total).toBe("$8.30");
+    const text = textOf(await housePage(code, cookies.Dina));
+    expect(text).toContain("Kecap manis");
+    expect(text).not.toContain("Plastic bag");
+  });
+});

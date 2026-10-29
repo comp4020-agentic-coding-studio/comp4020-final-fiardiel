@@ -1,8 +1,8 @@
 import { readFileSync } from "node:fs";
 import type { IncomingMessage, ServerResponse } from "node:http";
 import type { Hub } from "./live.ts";
-import { balancesFor, equalSplit, formatCents, parseCents, plainCents } from "./money.ts";
-import type { Share } from "./money.ts";
+import { balancesFor, equalSplit, formatCents, itemShares, parseCents, parseSignedCents, plainCents, signedPlainCents } from "./money.ts";
+import type { Item, Share } from "./money.ts";
 import { logAction } from "./log.ts";
 import { NAME_MAX, NOTE_MAX, nameKey, normaliseName, normaliseNote } from "./names.ts";
 import {
@@ -19,7 +19,7 @@ import {
   resetCodePage,
   resetPinPage,
 } from "./pages.ts";
-import type { Draft, Entry, HouseView } from "./pages.ts";
+import type { Draft, DraftItem, Entry, HouseView } from "./pages.ts";
 import { renderReadmePage } from "./readme.ts";
 import { ITEMS_MAX, PHOTO_TYPES } from "./receipt.ts";
 import type { Receipts } from "./receipt.ts";
@@ -27,8 +27,8 @@ import type { Person, Store } from "./store.ts";
 
 const README = new URL("../README.md", import.meta.url);
 const CODE_RE = /^[23456789A-HJ-NP-Z]{6}$/;
-// Room for a bill's fields plus the item lines carried over from a receipt.
-const MAX_BODY = 16_384;
+// Room for a bill's fields plus a receipt's lines, each with a tick per person.
+const MAX_BODY = 32_768;
 const MAX_PHOTO = 5 * 1024 * 1024;
 const NO_SUCH_HOUSE = "There's no house with that code. Check it and try again.";
 const BAD_PIN = "Pick a 4-digit PIN.";
@@ -134,12 +134,14 @@ function viewFor(store: Store, code: string, me: Person): HouseView {
   const dated: { at: number; entry: Entry }[] = [];
   for (const b of bills) {
     if (b.paidBy !== me.id && !b.shares.some((s) => s.personId === me.id)) continue;
+    const byOrder = (x: number, y: number): number => (order.get(x) ?? 0) - (order.get(y) ?? 0);
     const shares = [...b.shares]
-      .sort((x, y) => (order.get(x.personId) ?? 0) - (order.get(y.personId) ?? 0))
+      .sort((x, y) => byOrder(x.personId, y.personId))
       .map((s) => ({ person: who(s.personId), cents: s.cents }));
+    const items = b.items.map((i) => ({ name: i.name, cents: i.cents, people: [...i.people].sort(byOrder).map(who) }));
     dated.push({
       at: b.at,
-      entry: { kind: "bill", id: b.id, paidBy: who(b.paidBy), note: b.note, shares, mine: b.paidBy === me.id },
+      entry: { kind: "bill", id: b.id, paidBy: who(b.paidBy), note: b.note, shares, items, mine: b.paidBy === me.id },
     });
   }
   // A PIN change is about the house's names, so everyone sees it.
@@ -167,6 +169,49 @@ function viewFor(store: Store, code: string, me: Person): HouseView {
 function idFrom(raw: string | null): number | null {
   const id = Number(raw ?? "");
   return raw !== null && raw.trim() !== "" && Number.isInteger(id) && id > 0 ? id : null;
+}
+
+// The receipt lines as the form sent them back. Names are cleaned again, and
+// only this house's people can be ticked.
+function postedItems(form: URLSearchParams, people: Person[]): DraftItem[] {
+  const items: DraftItem[] = [];
+  for (let i = 0; i < ITEMS_MAX && form.has(`item_name_${i}`); i++) {
+    items.push({
+      name: normaliseNote(form.get(`item_name_${i}`) ?? "") ?? "",
+      price: form.get(`item_price_${i}`) ?? "",
+      people: people.filter((p) => form.has(`item_${i}_with_${p.id}`)).map((p) => p.id),
+    });
+  }
+  return items;
+}
+
+// The form split by item, with each person's share (in house order) and a
+// warning when the lines don't add up to the receipt's total.
+function byItem(draft: Draft, worked: { items: Item[]; shares: Share[] }, people: Person[]): Draft {
+  const cents = new Map(worked.shares.map((s) => [s.personId, s.cents] as const));
+  const shares = people.filter((p) => cents.has(p.id)).map((p) => ({ person: p, cents: cents.get(p.id) ?? 0 }));
+  // Every line counts here, ticked or not: they are all on the paper.
+  const lines = draft.items?.reduce((sum, i) => sum + (parseSignedCents(i.price) ?? 0), 0) ?? 0;
+  const total = parseCents(draft.receiptTotal ?? "");
+  const message =
+    draft.message ??
+    (total !== null && total !== lines
+      ? `The lines add up to ${formatCents(lines)}, but the receipt says ${formatCents(total)}. Check for a misread price.`
+      : undefined);
+  return { ...draft, shares, message };
+}
+
+// Each person's share, worked out here from the items and ticks, never taken
+// from the page. A message instead when a price can't be read.
+function workOut(draft: DraftItem[], payerId: number): { items: Item[]; shares: Share[] } | string {
+  const items: Item[] = [];
+  for (const d of draft) {
+    const cents = parseSignedCents(d.price);
+    if (cents === null) return `The price of ${d.name === "" ? "a line" : d.name} doesn't look like dollars. Use a number like 4.50.`;
+    // A line ticked on nobody, or costing nothing, isn't part of the bill.
+    if (d.people.length > 0 && cents !== 0) items.push({ name: d.name, cents, people: d.people });
+  }
+  return { items, shares: itemShares(items, payerId) };
 }
 
 // Tells every open page in the house that something changed, and logs how many heard it.
@@ -326,15 +371,34 @@ async function house(
       total: form.get("total") ?? "",
       amounts: Object.fromEntries(people.map((p) => [p.id, form.get(`amount_${p.id}`) ?? ""] as const)),
       ticked: people.filter((p) => form.has(`with_${p.id}`)).map((p) => p.id),
-      // Lines read off a receipt come back from the page, so they are cleaned again.
-      items: form.getAll("item").map(normaliseNote).filter((i) => i !== null && i !== "").slice(0, ITEMS_MAX) as string[],
+      items: postedItems(form, people),
+      receiptTotal: form.get("receipt_total") ?? "",
     };
     const again = (message: string): void => {
       logAction(label, me, "rejected", { status: 400, reason: message });
-      sendHtml(res, 400, billPage(viewFor(store, code, me), { ...draft, message }, scan));
+      const worked = draft.items !== undefined && draft.items.length > 0 ? workOut(draft.items, me.id) : null;
+      const shown = worked === null || typeof worked === "string" ? draft : byItem(draft, worked, people);
+      sendHtml(res, 400, billPage(viewFor(store, code, me), { ...shown, message }, scan));
     };
     const note = normaliseNote(draft.note);
     if (note === null) return again(`Keep the note to ${NOTE_MAX} characters, without control characters.`);
+
+    // Split by item: the shares come from the items and ticks, and any amounts sent along are ignored.
+    if (draft.items !== undefined && draft.items.length > 0) {
+      const worked = workOut(draft.items, me.id);
+      if (typeof worked === "string") return again(worked);
+      if (form.get("intent") !== "add") return sendHtml(res, 200, billPage(viewFor(store, code, me), byItem(draft, worked, people), scan));
+      if (worked.shares.every((s) => s.cents === 0)) return again("Tick at least one person on an item.");
+      const below = worked.shares.find((s) => s.cents < 0);
+      if (below !== undefined) {
+        return again(`${people.find((p) => p.id === below.personId)?.name ?? "Someone"}'s share comes out below zero. Check the discounts.`);
+      }
+      const bill = store.addBill(code, me.id, note, worked.shares, worked.items);
+      if (bill === null) throw new HttpError(400, "That bill couldn't be added.");
+      logAction(label, me, "add_bill", { bill, cents: worked.shares.reduce((sum, s) => sum + s.cents, 0) });
+      broadcast(store, hub, code);
+      return redirect(res, `/h/${code}`);
+    }
 
     if (form.get("intent") === "fill") {
       const total = parseCents(draft.total);
@@ -388,14 +452,18 @@ async function house(
     });
     if (reading === null) return typeInstead(502, "Serumah couldn't read that receipt. Type the amounts instead.");
     logAction(label, me, "read_receipt", { cents: reading.totalCents, items: reading.items.length });
+    // Every line starts shared by everyone; the payer unticks who didn't have it.
     const draft: Draft = {
       note: reading.shop,
-      total: plainCents(reading.totalCents),
+      total: "",
       amounts: {},
       ticked: everyone,
-      items: reading.items.map((i) => `${i.name} ${formatCents(i.cents)}`),
+      items: reading.items.map((i) => ({ name: i.name, price: signedPlainCents(i.cents), people: everyone })),
+      receiptTotal: plainCents(reading.totalCents),
     };
-    return sendHtml(res, 200, billPage(viewFor(store, code, me), draft, scan));
+    const worked = workOut(draft.items ?? [], me.id);
+    const shown = typeof worked === "string" ? { ...draft, message: worked } : byItem(draft, worked, store.people(code));
+    return sendHtml(res, 200, billPage(viewFor(store, code, me), shown, scan));
   }
   if (method === "POST" && action === "delete") {
     const id = idFrom((await readForm(req)).get("bill"));

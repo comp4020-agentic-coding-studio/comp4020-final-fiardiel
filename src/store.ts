@@ -5,10 +5,11 @@ import { DatabaseSync } from "node:sqlite";
 import { nameKey, normaliseName } from "./names.ts";
 import { MAX_CENTS } from "./money.ts";
 import { hashPin, isPin, pinMatches } from "./pins.ts";
-import type { BillRecord, PaymentRecord, PaymentStatus, Share } from "./money.ts";
+import type { BillRecord, Item, PaymentRecord, PaymentStatus, Share } from "./money.ts";
 
 export type Person = { id: number; name: string };
-export type Bill = BillRecord & { at: number };
+// `items` are the receipt lines a bill was split by; empty for a bill typed in by amount.
+export type Bill = BillRecord & { at: number; items: Item[] };
 export type Payment = PaymentRecord & { at: number };
 export type JoinOutcome =
   | { ok: true; person: Person; token: string }
@@ -51,6 +52,13 @@ const SCHEMA = `
     cents integer not null check (cents > 0),
     primary key (bill_id, person_id)
   );
+  create table if not exists bill_items (
+    id integer primary key autoincrement,
+    bill_id integer not null references bills(id) on delete cascade,
+    name text not null,
+    cents integer not null,
+    people text not null -- the ids of who shared it, as a JSON array
+  );
   create table if not exists payments (
     id integer primary key autoincrement,
     house_code text not null references houses(code),
@@ -66,6 +74,7 @@ const SCHEMA = `
 type PersonRow = { id: number; name: string };
 type BillRow = { id: number; paid_by: number; note: string; created_at: number };
 type ShareRow = { bill_id: number; person_id: number; cents: number };
+type ItemRow = { bill_id: number; name: string; cents: number; people: string };
 type PaymentRow = { id: number; from_id: number; to_id: number; cents: number; status: string; created_at: number };
 
 export class Store {
@@ -192,15 +201,19 @@ export class Store {
   }
 
   // A bill holds only the people with an amount above zero. It is refused when
-  // nobody is left, when anyone in it (payer included) is not in this house, or
-  // when a person appears twice.
-  addBill(code: string, payerId: number, note: string, shares: Share[]): number | null {
+  // nobody is left, when anyone in it (payer included, and anyone on an item) is
+  // not in this house, or when a person appears twice.
+  addBill(code: string, payerId: number, note: string, shares: Share[], items: Item[] = []): number | null {
     const kept = shares.filter((s) => s.cents !== 0);
     if (kept.length === 0 || !this.inHouse(code, payerId)) return null;
     if (new Set(kept.map((s) => s.personId)).size !== kept.length) return null;
     for (const s of kept) {
       if (!Number.isInteger(s.cents) || s.cents < 0 || s.cents > MAX_CENTS) return null;
       if (!this.inHouse(code, s.personId)) return null;
+    }
+    for (const item of items) {
+      if (!Number.isInteger(item.cents) || Math.abs(item.cents) > MAX_CENTS) return null;
+      if (!item.people.every((id) => this.inHouse(code, id))) return null;
     }
     this.db.exec("begin");
     try {
@@ -211,6 +224,8 @@ export class Store {
       );
       const insert = this.db.prepare("insert into bill_shares (bill_id, person_id, cents) values (?, ?, ?)");
       for (const s of kept) insert.run(id, s.personId, s.cents);
+      const insertItem = this.db.prepare("insert into bill_items (bill_id, name, cents, people) values (?, ?, ?, ?)");
+      for (const item of items) insertItem.run(id, item.name, item.cents, JSON.stringify(item.people));
       this.db.exec("commit");
       return id;
     } catch (error) {
@@ -272,7 +287,25 @@ export class Store {
       list.push({ personId: s.person_id, cents: s.cents });
       shares.set(s.bill_id, list);
     }
-    return rows.map((r) => ({ id: r.id, paidBy: r.paid_by, note: r.note, at: r.created_at, shares: shares.get(r.id) ?? [] }));
+    const itemRows = this.db
+      .prepare(
+        "select i.bill_id, i.name, i.cents, i.people from bill_items i join bills b on b.id = i.bill_id where b.house_code = ? order by i.id",
+      )
+      .all(code) as ItemRow[];
+    const items = new Map<number, Item[]>();
+    for (const i of itemRows) {
+      const list = items.get(i.bill_id) ?? [];
+      list.push({ name: i.name, cents: i.cents, people: JSON.parse(i.people) as number[] });
+      items.set(i.bill_id, list);
+    }
+    return rows.map((r) => ({
+      id: r.id,
+      paidBy: r.paid_by,
+      note: r.note,
+      at: r.created_at,
+      shares: shares.get(r.id) ?? [],
+      items: items.get(r.id) ?? [],
+    }));
   }
 
   payments(code: string): Payment[] {

@@ -2,11 +2,31 @@ import { formatCents } from "./money.ts";
 import { NAME_MAX, NOTE_MAX } from "./names.ts";
 import type { Person } from "./store.ts";
 
-// `items` are the lines read off a receipt, for the payer to check against; they are never saved.
-export type Draft = { note: string; total: string; amounts: Record<number, string>; ticked: number[]; items?: string[]; message?: string };
+// A receipt line on the bill form, as the payer left it: the price as typed, and who is ticked.
+export type DraftItem = { name: string; price: string; people: number[] };
+// With `items`, the bill is split by item (only after reading a receipt), and
+// `shares` are each person's share worked out from them. Without, it is split by amount.
+export type Draft = {
+  note: string;
+  total: string;
+  amounts: Record<number, string>;
+  ticked: number[];
+  items?: DraftItem[];
+  receiptTotal?: string;
+  shares?: { person: Person; cents: number }[];
+  message?: string;
+};
 
 export type Entry =
-  | { kind: "bill"; id: number; paidBy: Person; note: string; shares: { person: Person; cents: number }[]; mine: boolean }
+  | {
+      kind: "bill";
+      id: number;
+      paidBy: Person;
+      note: string;
+      shares: { person: Person; cents: number }[];
+      items?: { name: string; cents: number; people: Person[] }[];
+      mine: boolean;
+    }
   | { kind: "payment"; id: number; from: Person; to: Person; cents: number; toMe: boolean }
   | { kind: "pin"; person: Person };
 
@@ -173,8 +193,20 @@ const STYLE = `
   .row input:not([type="checkbox"]), .split input { text-align: right; }
   .split { display: grid; grid-template-columns: 1fr auto; align-items: end; gap: 0.75rem; margin: 0; }
   .split label { margin: 0; font-size: 0.875rem; line-height: 1.4; color: var(--muted); }
-  .items { list-style: none; padding: 0; margin: 0 0 1rem; font-size: 0.875rem; }
-  .items li { padding: 0.25rem 0; border-bottom: 1px solid var(--rule); overflow-wrap: anywhere; }
+  /* A receipt line: its name and price box, then who shares it. */
+  .item { display: grid; grid-template-columns: 1fr 6.5rem; align-items: center; gap: 0.375rem 0.75rem; padding: 0.625rem 0; border-bottom: 1px solid var(--rule); }
+  .item-name { overflow-wrap: anywhere; }
+  .item input:not([type="checkbox"]) { text-align: right; }
+  .ticks { grid-column: 1 / -1; display: flex; flex-wrap: wrap; gap: 0.375rem 1rem; margin: 0; font-size: 0.875rem; }
+  .ticks label { display: inline-flex; align-items: center; gap: 0.375rem; }
+  .shares { list-style: none; padding: 0; margin: 0; font-variant-numeric: tabular-nums; }
+  .shares li { display: flex; justify-content: space-between; gap: 1rem; padding: 0.375rem 0; border-bottom: 1px solid var(--rule); }
+  .bought summary { margin-top: 0.75rem; color: var(--muted); font-size: 0.85rem; cursor: pointer; }
+  .bought ul { list-style: none; padding: 0; margin: 0.375rem 0 0; font-size: 0.875rem; }
+  .bought li { display: flex; flex-wrap: wrap; gap: 0 0.5rem; padding: 0.375rem 0; border-bottom: 1px solid var(--rule); }
+  .bought .item-name { flex: 1; }
+  .bought .price { font-variant-numeric: tabular-nums; }
+  .bought .people { flex-basis: 100%; color: var(--muted); font-size: 0.8rem; }
   [role="alert"], [role="status"] { margin: 0 0 1rem; padding: 0.75rem 1rem; background: var(--card); border-left: 3px solid var(--accent); border-radius: 8px; }
 
   /* Sign-in screens: one job each, centred, like picking a profile. The
@@ -463,7 +495,17 @@ function entryLine(entry: Entry, base: string, me: Person): string {
   const remove = entry.mine
     ? `<details class="confirm" data-bill="${entry.id}"><summary>${ICON_DELETE}<span class="closed">Delete</span><span class="opened">Cancel</span></summary><div class="ask"><p>Delete this bill for everyone?</p>${postForm(`${base}/delete`, { bill: String(entry.id) }, "Yes, delete", "danger", ICON_DELETE)}</div></details>`
     : "";
-  return `<li class="bill"><div class="line"><span class="pill bill">Bill</span><span class="what">${entry.note === "" ? "Bill" : esc(entry.note)}</span><span class="total">${formatCents(total)}</span></div><div class="by">${avatar(entry.paidBy, "small")}${name(entry.paidBy)} paid</div><ul class="chips">${chips}</ul>${remove}</li>`;
+  // A bill split by item shows what was in it, so a share comes with its reason.
+  const bought =
+    entry.items === undefined || entry.items.length === 0
+      ? ""
+      : `<details class="bought"><summary>What was bought</summary><ul>${entry.items
+          .map(
+            (i) =>
+              `<li><span class="item-name">${esc(i.name)}</span><span class="price">${formatCents(i.cents)}</span><span class="people">${i.people.map(name).join(", ")}</span></li>`,
+          )
+          .join("")}</ul></details>`;
+  return `<li class="bill"><div class="line"><span class="pill bill">Bill</span><span class="what">${entry.note === "" ? "Bill" : esc(entry.note)}</span><span class="total">${formatCents(total)}</span></div><div class="by">${avatar(entry.paidBy, "small")}${name(entry.paidBy)} paid</div><ul class="chips">${chips}</ul>${bought}${remove}</li>`;
 }
 
 // The same top on every house page: which house, who you are, and a way out
@@ -548,11 +590,41 @@ export function billPage(view: HouseView, draft?: Draft, scan = false): string {
         <button type="submit" class="secondary">Read receipt</button>
       </form>`
     : "";
-  const items =
-    d.items === undefined || d.items.length === 0
-      ? ""
-      : `<p class="quiet">Read from the receipt. Check it against the paper, then tick who shares it.</p>
-        <ul class="items">${d.items.map((i) => `<li>${esc(i)}<input type="hidden" name="item" value="${esc(i)}" /></li>`).join("")}</ul>`;
+  const byItem = d.items !== undefined && d.items.length > 0;
+  // Read off a receipt: one row per line, with a price box and who shares it.
+  const itemRows = (d.items ?? [])
+    .map(
+      (item, i) =>
+        `<div class="item" role="group" aria-labelledby="item-${i}"><span class="item-name" id="item-${i}">${esc(item.name)}</span><input type="hidden" name="item_name_${i}" value="${esc(item.name)}" /><input name="item_price_${i}" inputmode="decimal" autocomplete="off" value="${esc(item.price)}" aria-label="Price of ${esc(item.name)}" /><p class="ticks">${view.people
+          .map(
+            (p) =>
+              `<label><input type="checkbox" name="item_${i}_with_${p.id}"${item.people.includes(p.id) ? " checked" : ""} /> ${esc(p.name)}</label>`,
+          )
+          .join("")}</p></div>`,
+    )
+    .join("\n          ");
+  const split = byItem
+    ? `<fieldset>
+          <legend>What was bought, and who shares each thing</legend>
+          <p class="quiet">Read from the receipt. Fix any price that's wrong, and untick anyone who didn't have it. Untick everyone to leave a line out.</p>
+          ${itemRows}
+        </fieldset>
+        <fieldset>
+          <legend>Each person's share</legend>
+          <ul class="shares">${(d.shares ?? []).map((s) => `<li><span>${esc(s.person.name)}</span> <span>${formatCents(s.cents)}</span></li>`).join("")}</ul>
+        </fieldset>
+        <input type="hidden" name="receipt_total" value="${esc(d.receiptTotal ?? "")}" />
+        <button type="submit" name="intent" value="add">Add bill</button>
+        <p class="split"><span class="quiet">Changed a price or a tick?</span>
+        <button type="submit" name="intent" value="items" class="secondary">Work out shares</button></p>
+        <p class="quiet"><a href="${esc(base)}/bill">Type the bill in instead</a></p>`
+    : `<fieldset>
+          <legend>Who owes what (in dollars)</legend>
+          ${rows}
+        </fieldset>
+        <button type="submit" name="intent" value="add">Add bill</button>
+        <p class="split"><label>Or split a total equally between the ticked people <input name="total" inputmode="decimal" size="8" autocomplete="off" value="${esc(d.total)}" /></label>
+        <button type="submit" name="intent" value="fill" class="secondary">Split equally</button></p>`;
   // "Add bill" comes first so pressing Enter in a box adds the bill rather
   // than refilling the form.
   return layout(
@@ -563,15 +635,8 @@ export function billPage(view: HouseView, draft?: Draft, scan = false): string {
       ${receipt}
       <form class="card" method="post" action="${esc(base)}/bill">
         ${alertLine(d.message)}
-        ${items}
         <label>What for <input name="note" maxlength="${NOTE_MAX}" autocomplete="off" value="${esc(d.note)}" /></label>
-        <fieldset>
-          <legend>Who owes what (in dollars)</legend>
-          ${rows}
-        </fieldset>
-        <button type="submit" name="intent" value="add">Add bill</button>
-        <p class="split"><label>Or split a total equally between the ticked people <input name="total" inputmode="decimal" size="8" autocomplete="off" value="${esc(d.total)}" /></label>
-        <button type="submit" name="intent" value="fill" class="secondary">Split equally</button></p>
+        ${split}
       </form>`,
   );
 }

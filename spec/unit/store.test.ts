@@ -229,6 +229,41 @@ describe("bills", () => {
   });
 });
 
+describe("bill items", () => {
+  it("keeps the items a bill was split by, with who shared each, and drops them with the bill", () => {
+    const store = memory();
+    const code = store.createHouse();
+    const rafi = joinOk(store, code, "Rafi").person.id;
+    const dina = joinOk(store, code, "Dina").person.id;
+    const items = [
+      { name: "Milk 2L", cents: 310, people: [rafi, dina] },
+      { name: "Discount", cents: -100, people: [dina] },
+    ];
+    const id = store.addBill(code, rafi, "Coles", [{ personId: rafi, cents: 155 }, { personId: dina, cents: 55 }], items);
+    expect(id).not.toBeNull();
+    expect(store.bills(code)[0].items).toEqual(items);
+    store.deleteBill(code, id!, rafi);
+    expect(store.bills(code)).toEqual([]);
+  });
+
+  it("refuses an item shared by someone from another house", () => {
+    const store = memory();
+    const code = store.createHouse();
+    const rafi = joinOk(store, code, "Rafi").person.id;
+    const outsider = joinOk(store, store.createHouse(), "Ari").person.id;
+    const items = [{ name: "Milk", cents: 300, people: [rafi, outsider] }];
+    expect(store.addBill(code, rafi, "", [{ personId: rafi, cents: 300 }], items)).toBeNull();
+  });
+
+  it("gives a bill typed in by amount no items", () => {
+    const store = memory();
+    const code = store.createHouse();
+    const rafi = joinOk(store, code, "Rafi").person.id;
+    store.addBill(code, rafi, "", [{ personId: rafi, cents: 300 }]);
+    expect(store.bills(code)[0].items).toEqual([]);
+  });
+});
+
 describe("payments", () => {
   it("counts a payment as soon as it is recorded, between two people in the house", () => {
     const store = memory();

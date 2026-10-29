@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { balancesFor, equalSplit, formatCents, parseCents, plainCents } from "../../src/money.ts";
+import { balancesFor, equalSplit, formatCents, itemShares, parseCents, parseSignedCents, plainCents, signedPlainCents } from "../../src/money.ts";
 import type { BillRecord, PaymentRecord } from "../../src/money.ts";
 
 describe("parseCents", () => {
@@ -114,5 +114,55 @@ describe("balancesFor", () => {
   it("creates no debt from the payer's own share", () => {
     const solo: BillRecord[] = [{ id: 1, paidBy: rafi, note: "", shares: [{ personId: rafi, cents: 900 }] }];
     expect(balancesFor(rafi, solo, [])).toEqual(new Map());
+  });
+});
+
+describe("parseSignedCents and signedPlainCents", () => {
+  it("read and write a discount line as well as a price", () => {
+    expect(parseSignedCents("-1.00")).toBe(-100);
+    expect(parseSignedCents(" 3.1 ")).toBe(310);
+    expect(parseSignedCents("--1")).toBeNull();
+    expect(signedPlainCents(-100)).toBe("-1.00");
+    expect(signedPlainCents(310)).toBe("3.10");
+  });
+});
+
+describe("itemShares", () => {
+  const rafi = 1;
+  const dina = 2;
+  const ari = 3;
+
+  it("splits each item between the people ticked on it, leftover cents to the payer, and adds them up", () => {
+    const shares = itemShares(
+      [
+        { name: "Milk", cents: 310, people: [rafi, dina, ari] },
+        { name: "Kecap", cents: 520, people: [rafi, dina] },
+      ],
+      rafi,
+    );
+    expect(shares).toEqual([
+      { personId: rafi, cents: 104 + 260 },
+      { personId: dina, cents: 103 + 260 },
+      { personId: ari, cents: 103 },
+    ]);
+    expect(shares.reduce((sum, s) => sum + s.cents, 0)).toBe(310 + 520);
+  });
+
+  it("leaves out an item nobody is ticked on", () => {
+    expect(itemShares([{ name: "Bag", cents: 15, people: [] }, { name: "Milk", cents: 300, people: [dina] }], rafi)).toEqual([
+      { personId: dina, cents: 300 },
+    ]);
+  });
+
+  it("takes a discount off the people it was shared between, to the cent", () => {
+    const shares = itemShares(
+      [
+        { name: "Chips", cents: 600, people: [dina, ari] },
+        { name: "Discount", cents: -100, people: [dina, ari] },
+      ],
+      rafi,
+    );
+    expect(shares.reduce((sum, s) => sum + s.cents, 0)).toBe(500);
+    expect(shares.map((s) => s.cents).sort()).toEqual([250, 250]);
   });
 });

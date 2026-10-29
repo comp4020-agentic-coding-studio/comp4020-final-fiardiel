@@ -80,33 +80,92 @@ describe("POST /h/<code>/receipt", () => {
     return { store, listed, other, rafi, elsewhere, base, scan };
   }
 
-  const reading = { shop: "Coles <b>Civic</b>", totalCents: 1850, items: [{ name: "Milk <i>2L</i>", cents: 310 }] };
+  const reading = {
+    shop: "Coles <b>Civic</b>",
+    totalCents: 1850,
+    items: [
+      { name: "Milk <i>2L</i>", cents: 310 },
+      { name: "Kecap", cents: 520 },
+    ],
+  };
   const doc = (html: string) => new JSDOM(html).window.document;
+  const sharesOf = (d: Document) => [...d.querySelectorAll(".shares li")].map((li) => li.textContent?.replace(/\s+/g, " ").trim());
+  // The bill form as a browser would post it: ticked boxes only.
+  const formOf = (d: Document): URLSearchParams => {
+    const form = new URLSearchParams();
+    for (const input of d.querySelectorAll<HTMLInputElement>("form[action$='/bill'] input[name]")) {
+      if (input.type !== "checkbox" || input.checked) form.append(input.name, input.value);
+    }
+    return form;
+  };
+  const ids = (store: Store, code: string) => Object.fromEntries(store.people(code).map((p) => [p.name, p.id] as const));
 
-  it("fills the bill form from the receipt, and adds no bill", async () => {
+  it("lists each item with a price box and everyone ticked, and adds no bill", async () => {
     const seen: string[] = [];
     const { store, listed, rafi, scan } = await app(async (_image, type) => (seen.push(type), reading));
     const res = await scan(listed, rafi);
     expect(res.status).toBe(200);
     const d = doc(await res.text());
+    const { Rafi, Dina } = ids(store, listed);
     expect(d.querySelector<HTMLInputElement>('input[name="note"]')?.value).toBe("Coles <b>Civic</b>");
-    expect(d.querySelector<HTMLInputElement>('input[name="total"]')?.value).toBe("18.50");
-    expect([...d.querySelectorAll(".items li")].map((li) => li.textContent?.trim())).toEqual(["Milk <i>2L</i> $3.10"]);
-    expect(d.querySelector(".items i")).toBeNull();
+    expect(d.querySelector<HTMLInputElement>('input[name="item_name_0"]')?.value).toBe("Milk <i>2L</i>");
+    expect(d.querySelector<HTMLInputElement>('input[name="item_price_1"]')?.value).toBe("5.20");
+    expect(d.querySelector<HTMLInputElement>(`input[name="item_0_with_${Rafi}"]`)?.checked).toBe(true);
+    expect(d.querySelector<HTMLInputElement>(`input[name="item_1_with_${Dina}"]`)?.checked).toBe(true);
+    expect(d.querySelector("form[action$='/bill'] i")).toBeNull();
+    // Typed amounts are for bills typed in by hand only.
+    expect(d.querySelector('input[name^="amount_"]')).toBeNull();
+    // In name order, like everything else.
+    expect(sharesOf(d)).toEqual(["Dina $4.15", "Rafi $4.15"]);
+    expect(d.querySelector('[role="alert"]')?.textContent).toContain("the receipt says $18.50");
     expect(seen).toEqual(["image/jpeg"]);
     expect(store.bills(listed)).toEqual([]);
   });
 
-  it("keeps the items through Split equally", async () => {
-    const { listed, rafi, base, scan } = await app(async () => reading);
-    const d = doc(await (await scan(listed, rafi)).text());
-    const form = new URLSearchParams();
-    for (const input of d.querySelectorAll<HTMLInputElement>("form[action$='/bill'] input[name]")) {
-      if (input.type !== "checkbox" || input.checked) form.append(input.name, input.value);
-    }
-    form.set("intent", "fill");
+  it("works out new shares when the payer changes a price or a tick, still adding nothing", async () => {
+    const { store, listed, rafi, base, scan } = await app(async () => reading);
+    const { Dina } = ids(store, listed);
+    const form = formOf(doc(await (await scan(listed, rafi)).text()));
+    form.delete(`item_1_with_${Dina}`);
+    form.set("item_price_0", "3.20");
+    form.set("intent", "items");
     const res = await fetch(`${base}/h/${listed}/bill`, { method: "POST", headers: { cookie: rafi }, body: form });
-    expect([...doc(await res.text()).querySelectorAll(".items li")].map((li) => li.textContent?.trim())).toEqual(["Milk <i>2L</i> $3.10"]);
+    expect(res.status).toBe(200);
+    expect(sharesOf(doc(await res.text()))).toEqual(["Dina $1.60", "Rafi $6.80"]);
+    expect(store.bills(listed)).toEqual([]);
+  });
+
+  it("adds the bill from the items and ticks, ignoring any amounts sent with them, and keeps the items", async () => {
+    const { store, listed, rafi, base, scan } = await app(async () => reading);
+    const { Rafi, Dina } = ids(store, listed);
+    const form = formOf(doc(await (await scan(listed, rafi)).text()));
+    form.delete(`item_1_with_${Dina}`);
+    form.set(`amount_${Dina}`, "999");
+    form.set("intent", "add");
+    const res = await fetch(`${base}/h/${listed}/bill`, { method: "POST", headers: { cookie: rafi }, body: form, redirect: "manual" });
+    expect(res.status).toBe(303);
+    const [bill] = store.bills(listed);
+    expect(bill.shares).toEqual([
+      { personId: Dina, cents: 155 },
+      { personId: Rafi, cents: 155 + 520 },
+    ]);
+    expect(bill.items).toEqual([
+      { name: "Milk <i>2L</i>", cents: 310, people: [Dina, Rafi] },
+      { name: "Kecap", cents: 520, people: [Rafi] },
+    ]);
+  });
+
+  it("refuses a price that isn't dollars, and keeps what was there", async () => {
+    const { store, listed, rafi, base, scan } = await app(async () => reading);
+    const form = formOf(doc(await (await scan(listed, rafi)).text()));
+    form.set("item_price_1", "five");
+    form.set("intent", "add");
+    const res = await fetch(`${base}/h/${listed}/bill`, { method: "POST", headers: { cookie: rafi }, body: form });
+    expect(res.status).toBe(400);
+    const d = doc(await res.text());
+    expect(d.querySelector('[role="alert"]')?.textContent).toContain("Kecap");
+    expect(d.querySelector<HTMLInputElement>('input[name="item_name_0"]')?.value).toBe("Milk <i>2L</i>");
+    expect(store.bills(listed)).toEqual([]);
   });
 
   it("is not there for a house that isn't on the list", async () => {

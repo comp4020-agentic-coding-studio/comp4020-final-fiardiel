@@ -50,6 +50,18 @@ Where it was corrected:
 
 One Node and TypeScript server, SQLite on the Fly volume, server-rendered HTML and no framework, as in Crit 8. The machine is small and the app is for one house, so I kept it to as little as possible. Live updates use server-sent events: the server only needs to tell open pages that something changed, and each page fetches itself again. Button presses stay ordinary form posts, so everything still works without JavaScript, just without the live part.
 
+## Final project: reading receipts
+
+I wanted the payer to photograph a receipt instead of typing the amounts. I thought about training my own model to read receipts, but that would have been a different project, and in the time left it would read worse than Claude Haiku. So the app sends the photo to Haiku ([`d67d2a0`](https://github.com/comp4020-agentic-coding-studio/comp4020-final-fiardiel/commit/d67d2a0)).
+
+Reading a receipt costs money, and I didn't want strangers using it on my bill. My first idea was a password in front of it, but the agent pointed out that this breaks my own rule of no passwords. Instead, the server lists the houses that may read receipts (`RECEIPT_HOUSES`), each up to a daily limit, and my API key has a spend limit. Every other house never sees the button. That rule went into `CLAUDE.md` and into checks before the code was written.
+
+Haiku's reading only fills in the bill form: the shop, the total, and the items to check against the paper. The payer still ticks who shares it and taps Add bill, so a wrong reading costs a correction, not a wrong debt. The answer is checked like anything typed: whole cents, cleaned names. The photo is never stored or logged.
+
+I added one dependency, Anthropic's SDK, for its retries and typed errors. I pinned it at 0.133.0, because every 1.x release was less than ten days old.
+
+**For the marker:** reading receipts only works in a listed house. The code for one is in my private Ed post.
+
 ## What is not done
 
-Chores, reading receipts and editing a bill are not built yet.
+Chores and editing a bill are not built yet.

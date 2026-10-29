@@ -8,7 +8,8 @@
 FROM docker.io/library/node:24.21.0-alpine
 WORKDIR /app
 
-# Only production dependencies go in the image: marked, for the README page.
+# Only production dependencies go in the image: marked, for the README page,
+# and Anthropic's SDK, for reading receipts.
 RUN npm install --global pnpm@11.9.0
 COPY package.json pnpm-lock.yaml pnpm-workspace.yaml ./
 RUN pnpm install --prod --frozen-lockfile

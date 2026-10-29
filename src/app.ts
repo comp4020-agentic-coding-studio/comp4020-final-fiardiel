@@ -1,7 +1,7 @@
 import { readFileSync } from "node:fs";
 import type { IncomingMessage, ServerResponse } from "node:http";
 import type { Hub } from "./live.ts";
-import { balancesFor, equalSplit, parseCents, plainCents } from "./money.ts";
+import { balancesFor, equalSplit, formatCents, parseCents, plainCents } from "./money.ts";
 import type { Share } from "./money.ts";
 import { logAction } from "./log.ts";
 import { NAME_MAX, NOTE_MAX, nameKey, normaliseName, normaliseNote } from "./names.ts";
@@ -21,11 +21,15 @@ import {
 } from "./pages.ts";
 import type { Draft, Entry, HouseView } from "./pages.ts";
 import { renderReadmePage } from "./readme.ts";
+import { ITEMS_MAX, PHOTO_TYPES } from "./receipt.ts";
+import type { Receipts } from "./receipt.ts";
 import type { Person, Store } from "./store.ts";
 
 const README = new URL("../README.md", import.meta.url);
 const CODE_RE = /^[23456789A-HJ-NP-Z]{6}$/;
-const MAX_BODY = 4096;
+// Room for a bill's fields plus the item lines carried over from a receipt.
+const MAX_BODY = 16_384;
+const MAX_PHOTO = 5 * 1024 * 1024;
 const NO_SUCH_HOUSE = "There's no house with that code. Check it and try again.";
 const BAD_PIN = "Pick a 4-digit PIN.";
 const BAD_NAME = `Pick a name of 1 to ${NAME_MAX} characters, without control characters.`;
@@ -67,18 +71,22 @@ function notFound(res: ServerResponse): void {
   sendHtml(res, 404, messagePage("Not found", "There's nothing at this address."));
 }
 
-// Form bodies here are a few short fields, so anything bigger is refused. The
-// rest of an oversized body is read and thrown away before refusing: leaving
+// Bodies here are a few short fields or one photo, so anything bigger is refused.
+// The rest of an oversized body is read and thrown away before refusing: leaving
 // the loop early would destroy the socket and the 413 would never be sent.
-async function readForm(req: IncomingMessage): Promise<URLSearchParams> {
+async function readBody(req: IncomingMessage, limit: number, tooLarge: string): Promise<Buffer> {
   const chunks: Buffer[] = [];
   let size = 0;
   for await (const chunk of req) {
     size += (chunk as Buffer).length;
-    if (size <= MAX_BODY) chunks.push(chunk as Buffer);
+    if (size <= limit) chunks.push(chunk as Buffer);
   }
-  if (size > MAX_BODY) throw new HttpError(413, "That request is too large.");
-  return new URLSearchParams(Buffer.concat(chunks).toString("utf8"));
+  if (size > limit) throw new HttpError(413, tooLarge);
+  return Buffer.concat(chunks);
+}
+
+async function readForm(req: IncomingMessage): Promise<URLSearchParams> {
+  return new URLSearchParams((await readBody(req, MAX_BODY, "That request is too large.")).toString("utf8"));
 }
 
 function cookieName(code: string): string {
@@ -167,10 +175,11 @@ function broadcast(store: Store, hub: Hub, code: string): void {
   logAction(store.houseLabel(code), null, "broadcast", { clients: hub.count(code) });
 }
 
-export function createHandler(store: Store, hub: Hub) {
+// `receipts` is null unless the server has a Claude key and a list of houses.
+export function createHandler(store: Store, hub: Hub, receipts: Receipts | null = null) {
   return async (req: IncomingMessage, res: ServerResponse): Promise<void> => {
     try {
-      await route(store, hub, req, res);
+      await route(store, hub, receipts, req, res);
     } catch (error) {
       if (res.headersSent) {
         // A response has already started; a second one cannot be written.
@@ -195,7 +204,7 @@ export function createHandler(store: Store, hub: Hub) {
   };
 }
 
-async function route(store: Store, hub: Hub, req: IncomingMessage, res: ServerResponse): Promise<void> {
+async function route(store: Store, hub: Hub, receipts: Receipts | null, req: IncomingMessage, res: ServerResponse): Promise<void> {
   // Node leaves the body off a HEAD response, so HEAD is routed as GET.
   const method = req.method === "HEAD" ? "GET" : (req.method ?? "GET");
   const url = parseUrl(req.url);
@@ -236,12 +245,13 @@ async function route(store: Store, hub: Hub, req: IncomingMessage, res: ServerRe
     return sendHtml(res, 404, messagePage("No such house", NO_SUCH_HOUSE));
   }
   if (id !== undefined) return person(store, hub, req, res, code, method, action, Number(id));
-  return house(store, hub, req, res, code, method, action);
+  return house(store, hub, receipts, req, res, code, method, action);
 }
 
 async function house(
   store: Store,
   hub: Hub,
+  receipts: Receipts | null,
   req: IncomingMessage,
   res: ServerResponse,
   code: string,
@@ -305,7 +315,8 @@ async function house(
     logAction(label, me, "snapshot", { page: "history" });
     return sendHtml(res, 200, historyPage(viewFor(store, code, me)));
   }
-  if (method === "GET" && action === "bill") return sendHtml(res, 200, billPage(viewFor(store, code, me)));
+  const scan = receipts?.houses.has(code) ?? false;
+  if (method === "GET" && action === "bill") return sendHtml(res, 200, billPage(viewFor(store, code, me), undefined, scan));
   if (method === "GET" && action === "pay") return sendHtml(res, 200, payPage(viewFor(store, code, me)));
   if (method === "POST" && action === "bill") {
     const form = await readForm(req);
@@ -315,10 +326,12 @@ async function house(
       total: form.get("total") ?? "",
       amounts: Object.fromEntries(people.map((p) => [p.id, form.get(`amount_${p.id}`) ?? ""] as const)),
       ticked: people.filter((p) => form.has(`with_${p.id}`)).map((p) => p.id),
+      // Lines read off a receipt come back from the page, so they are cleaned again.
+      items: form.getAll("item").map(normaliseNote).filter((i) => i !== null && i !== "").slice(0, ITEMS_MAX) as string[],
     };
     const again = (message: string): void => {
       logAction(label, me, "rejected", { status: 400, reason: message });
-      sendHtml(res, 400, billPage(viewFor(store, code, me), { ...draft, message }));
+      sendHtml(res, 400, billPage(viewFor(store, code, me), { ...draft, message }, scan));
     };
     const note = normaliseNote(draft.note);
     if (note === null) return again(`Keep the note to ${NOTE_MAX} characters, without control characters.`);
@@ -332,7 +345,7 @@ async function house(
         const cents = split.get(p.id);
         draft.amounts[p.id] = cents === undefined ? "" : plainCents(cents);
       }
-      return sendHtml(res, 200, billPage(viewFor(store, code, me), draft));
+      return sendHtml(res, 200, billPage(viewFor(store, code, me), draft, scan));
     }
 
     // People who joined after the form was drawn have no box, so only the
@@ -351,6 +364,38 @@ async function house(
     logAction(store.houseLabel(code), me, "add_bill", { bill, cents: shares.reduce((sum, s) => sum + s.cents, 0) });
     broadcast(store, hub, code);
     return redirect(res, `/h/${code}`);
+  }
+  if (method === "POST" && action === "receipt") {
+    // A house not on the list gets nothing here, and nothing is spent.
+    if (receipts === null || !scan) throw new HttpError(404, "There's nothing at this address.");
+    const everyone = store.people(code).map((p) => p.id);
+    const typeInstead = (status: number, message: string): void => {
+      logAction(label, me, "rejected", { status, reason: message });
+      sendHtml(res, status, billPage(viewFor(store, code, me), { note: "", total: "", amounts: {}, ticked: everyone, message }, scan));
+    };
+    const body = await readBody(req, MAX_PHOTO, "That photo is too large. Try one under 5 MB.");
+    const type = req.headers["content-type"] ?? "";
+    const photo = await new Response(new Uint8Array(body), { headers: { "content-type": type } }).formData().then((f) => f.get("photo"), () => null);
+    if (!(photo instanceof File) || !PHOTO_TYPES.has(photo.type)) return typeInstead(400, "Choose a photo of the receipt: JPEG, PNG, WebP or GIF.");
+    // The scan is counted before Claude is called, so failures count too.
+    if (!receipts.limit.take(code)) {
+      return typeInstead(429, `This house has read ${receipts.limit.perDay} receipts today, the most for one day. Type the amounts instead.`);
+    }
+    // The photo itself is never logged or kept.
+    const reading = await receipts.read(Buffer.from(await photo.arrayBuffer()), photo.type).catch((error: unknown) => {
+      console.error(`[${label}] reading a receipt failed: ${String(error)}`);
+      return null;
+    });
+    if (reading === null) return typeInstead(502, "Serumah couldn't read that receipt. Type the amounts instead.");
+    logAction(label, me, "read_receipt", { cents: reading.totalCents, items: reading.items.length });
+    const draft: Draft = {
+      note: reading.shop,
+      total: plainCents(reading.totalCents),
+      amounts: {},
+      ticked: everyone,
+      items: reading.items.map((i) => `${i.name} ${formatCents(i.cents)}`),
+    };
+    return sendHtml(res, 200, billPage(viewFor(store, code, me), draft, scan));
   }
   if (method === "POST" && action === "delete") {
     const id = idFrom((await readForm(req)).get("bill"));

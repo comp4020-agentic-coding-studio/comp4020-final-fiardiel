@@ -11,6 +11,7 @@ These come from the argument in `README.md`. If a change would break one, stop a
 - **Require accounts, passwords or email.** A person is a name inside a house, with a 4-digit PIN that guards against using someone else's name by accident, not against housemates. The house code is the one shared secret; retyping it resets a PIN. PINs are never stored or logged in plain form, and the logs name a house by a label like `h12`, never by its code.
 - **Show a name or any typed text as markup.** Everything another person typed is escaped in the page. Names are trimmed, length-limited, normalised, and refused when invisible.
 - **Let one house touch another.** Every read and write is scoped to the house code. A cookie works only in its own house.
+- **Spend money reading a receipt for a house that isn't on the list.** Reading a receipt calls Claude, which costs money, so it works only in houses the server lists in `RECEIPT_HOUSES`, up to a daily limit each. Every other house never sees the button. What it reads only fills in the bill form; nothing is added until the payer taps Add bill. Receipt photos are never stored or logged.
 
 ## How to work here
 

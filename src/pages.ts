@@ -2,7 +2,8 @@ import { formatCents } from "./money.ts";
 import { NAME_MAX, NOTE_MAX } from "./names.ts";
 import type { Person } from "./store.ts";
 
-export type Draft = { note: string; total: string; amounts: Record<number, string>; ticked: number[]; message?: string };
+// `items` are the lines read off a receipt, for the payer to check against; they are never saved.
+export type Draft = { note: string; total: string; amounts: Record<number, string>; ticked: number[]; items?: string[]; message?: string };
 
 export type Entry =
   | { kind: "bill"; id: number; paidBy: Person; note: string; shares: { person: Person; cents: number }[]; mine: boolean }
@@ -172,6 +173,8 @@ const STYLE = `
   .row input:not([type="checkbox"]), .split input { text-align: right; }
   .split { display: grid; grid-template-columns: 1fr auto; align-items: end; gap: 0.75rem; margin: 0; }
   .split label { margin: 0; font-size: 0.875rem; line-height: 1.4; color: var(--muted); }
+  .items { list-style: none; padding: 0; margin: 0 0 1rem; font-size: 0.875rem; }
+  .items li { padding: 0.25rem 0; border-bottom: 1px solid var(--rule); overflow-wrap: anywhere; }
   [role="alert"], [role="status"] { margin: 0 0 1rem; padding: 0.75rem 1rem; background: var(--card); border-left: 3px solid var(--accent); border-radius: 8px; }
 
   /* Sign-in screens: one job each, centred, like picking a profile. The
@@ -529,7 +532,8 @@ export function historyPage(view: HouseView): string {
   );
 }
 
-export function billPage(view: HouseView, draft?: Draft): string {
+// `scan` is whether this house may read receipts; other houses never see the upload.
+export function billPage(view: HouseView, draft?: Draft, scan = false): string {
   const base = `/h/${view.code}`;
   const d = draft ?? { note: "", total: "", amounts: {}, ticked: view.people.map((p) => p.id) };
   const rows = view.people
@@ -538,6 +542,17 @@ export function billPage(view: HouseView, draft?: Draft): string {
         `<p class="row"><label><input type="checkbox" name="with_${p.id}"${d.ticked.includes(p.id) ? " checked" : ""} /> ${esc(p.name)}</label> <input name="amount_${p.id}" inputmode="decimal" size="8" autocomplete="off" value="${esc(d.amounts[p.id] ?? "")}" aria-label="${esc(p.name)}'s amount" /></p>`,
     )
     .join("\n          ");
+  const receipt = scan
+    ? `<form class="card" method="post" action="${esc(base)}/receipt" enctype="multipart/form-data">
+        <label>Photo of the receipt <input type="file" name="photo" accept="image/jpeg,image/png,image/webp,image/gif" required /></label>
+        <button type="submit" class="secondary">Read receipt</button>
+      </form>`
+    : "";
+  const items =
+    d.items === undefined || d.items.length === 0
+      ? ""
+      : `<p class="quiet">Read from the receipt. Check it against the paper, then tick who shares it.</p>
+        <ul class="items">${d.items.map((i) => `<li>${esc(i)}<input type="hidden" name="item" value="${esc(i)}" /></li>`).join("")}</ul>`;
   // "Add bill" comes first so pressing Enter in a box adds the bill rather
   // than refilling the form.
   return layout(
@@ -545,8 +560,10 @@ export function billPage(view: HouseView, draft?: Draft): string {
     `${houseTop(view)}
       ${backLink(view.code)}
       <h2 class="page">Add a bill you paid</h2>
+      ${receipt}
       <form class="card" method="post" action="${esc(base)}/bill">
         ${alertLine(d.message)}
+        ${items}
         <label>What for <input name="note" maxlength="${NOTE_MAX}" autocomplete="off" value="${esc(d.note)}" /></label>
         <fieldset>
           <legend>Who owes what (in dollars)</legend>

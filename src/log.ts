@@ -22,6 +22,7 @@ export function logLine(house: string, person: Person | null, action: string, de
     wrong_code: () => `REFUSED wrong house code when resetting ${who(person)}'s PIN${from}`,
     reset_pin: () => `${who(person)} had their PIN reset${from}`,
     add_bill: () => `${who(person)} added bill #${d.bill} for ${money()}`,
+    read_receipt: () => `${who(person)} read a receipt for ${money()} (${d.items} items); nothing is added until they tap Add bill`,
     delete_bill: () => `${who(person)} deleted bill #${d.bill}`,
     delete_refused: () => `REFUSED ${who(person)}: can't delete bill #${d.bill}, someone else paid it`,
     pay: () => `${who(person)} paid ${JSON.stringify(String(d.to))} ${money()} (payment #${d.payment})`,

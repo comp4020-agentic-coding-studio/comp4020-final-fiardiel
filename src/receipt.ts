@@ -5,7 +5,15 @@ import { normaliseNote } from "./names.ts";
 // Reading a receipt photo with Claude. What comes back only fills in the bill
 // form for the payer to check; nothing here adds a bill.
 
-export type Reading = { shop: string; totalCents: number; items: { name: string; cents: number }[] };
+// `off` is how much a discount took off that item (already out of `cents`);
+// `fees` are charges or credits on the whole receipt; GST is only a note.
+export type Reading = {
+  shop: string;
+  totalCents: number;
+  items: { name: string; cents: number; off: number }[];
+  fees: { name: string; cents: number }[];
+  gstCents: number;
+};
 export type ReadReceipt = (image: Buffer, mediaType: string) => Promise<Reading | null>;
 // Who may read receipts: the listed houses, each up to its daily limit.
 export type Receipts = { houses: Set<string>; limit: ScanLimit; read: ReadReceipt };
@@ -26,13 +34,21 @@ export function checkReading(raw: unknown): Reading | null {
   if (typeof raw !== "object" || raw === null) return null;
   const r = raw as Record<string, unknown>;
   if (!isCents(r.total_cents, 1) || !Array.isArray(r.items)) return null;
+  // A line's name and signed cents, or null when either isn't sound.
+  const line = (raw: unknown): { name: string; cents: number } | null => {
+    const l = raw as Record<string, unknown> | null;
+    const name = clean(l?.name, ITEM_NAME_MAX);
+    const cents = l?.cents;
+    return name !== null && name !== "" && typeof cents === "number" && isCents(Math.abs(cents), 0) ? { name, cents } : null;
+  };
   const items: Reading["items"] = [];
-  for (const item of r.items.slice(0, ITEMS_MAX)) {
-    const name = clean(item?.name, ITEM_NAME_MAX);
-    const cents: unknown = item?.cents;
-    if (name !== null && name !== "" && typeof cents === "number" && isCents(Math.abs(cents), 0)) items.push({ name, cents });
+  for (const raw of r.items.slice(0, ITEMS_MAX)) {
+    const item = line(raw);
+    const off = (raw as Record<string, unknown> | null)?.discount_cents;
+    if (item !== null) items.push({ ...item, off: isCents(off, 0) ? off : 0 });
   }
-  return { shop: clean(r.shop, ITEM_NAME_MAX) ?? "", totalCents: r.total_cents, items };
+  const fees = (Array.isArray(r.fees) ? r.fees.slice(0, ITEMS_MAX) : []).map(line).filter((f) => f !== null);
+  return { shop: clean(r.shop, ITEM_NAME_MAX) ?? "", totalCents: r.total_cents, items, fees, gstCents: isCents(r.gst_cents, 0) ? r.gst_cents : 0 };
 }
 
 const SCHEMA = {
@@ -46,20 +62,40 @@ const SCHEMA = {
         type: "object",
         properties: {
           name: { type: "string" },
-          cents: { type: "integer", description: "The line's price in whole cents; negative for a discount." },
+          cents: { type: "integer", description: "What was paid for this item in whole cents, after any discount on this item." },
+          discount_cents: { type: "integer", description: "How much a discount or promo on this item took off, in whole cents; 0 if none." },
+        },
+        required: ["name", "cents", "discount_cents"],
+        additionalProperties: false,
+      },
+    },
+    fees: {
+      type: "array",
+      description: "Charges or credits on the whole receipt rather than one item.",
+      items: {
+        type: "object",
+        properties: {
+          name: { type: "string" },
+          cents: { type: "integer", description: "In whole cents; negative for a credit, a whole-shop discount or rounding down." },
         },
         required: ["name", "cents"],
         additionalProperties: false,
       },
     },
+    gst_cents: { type: "integer", description: "The GST the receipt says is included, in whole cents; 0 if not shown." },
   },
-  required: ["shop", "total_cents", "items"],
+  required: ["shop", "total_cents", "items", "fees", "gst_cents"],
   additionalProperties: false,
 };
 
-const PROMPT =
-  "This is a photo of a shopping receipt. Read the shop's name, every line item with its price, and the total paid. " +
-  "Give amounts in whole cents. If a price can't be read, leave that line out rather than guess.";
+const PROMPT = [
+  "This is a photo of a shopping receipt. Read the shop's name, every item bought, and the total paid, in whole cents.",
+  "When a discount, promo or price drop applies to one item, take it off that item: give the price paid in cents and the amount taken off in discount_cents, and don't list the discount as a line of its own.",
+  "Charges or credits on the whole receipt go in fees, not items: card or payment surcharges, delivery, service or packing fees, cash rounding, and discounts on the whole shop.",
+  "A bag fee or a bottle or can deposit is an item.",
+  "Don't list GST, subtotals, totals, how it was paid, change, savings summaries or loyalty points as items or fees. If the receipt says how much GST is included, give it in gst_cents.",
+  "If a price can't be read, leave that line out rather than guess.",
+].join(" ");
 
 export function claudeReader(client: Anthropic): ReadReceipt {
   return async (image, mediaType) => {

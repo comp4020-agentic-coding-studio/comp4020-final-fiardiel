@@ -1,7 +1,7 @@
 import { readFileSync } from "node:fs";
 import type { IncomingMessage, ServerResponse } from "node:http";
 import type { Hub } from "./live.ts";
-import { balancesFor, equalSplit, formatCents, itemShares, parseCents, parseSignedCents, plainCents, signedPlainCents } from "./money.ts";
+import { balancesFor, equalSplit, formatCents, itemShares, parseCents, parseSignedCents, plainCents, signedPlainCents, withFees } from "./money.ts";
 import type { Item, Share } from "./money.ts";
 import { logAction } from "./log.ts";
 import { NAME_MAX, NOTE_MAX, nameKey, normaliseName, normaliseNote } from "./names.ts";
@@ -23,7 +23,7 @@ import type { Draft, DraftItem, Entry, HouseView } from "./pages.ts";
 import { renderReadmePage } from "./readme.ts";
 import { ITEMS_MAX, PHOTO_TYPES } from "./receipt.ts";
 import type { Receipts } from "./receipt.ts";
-import type { Person, Store } from "./store.ts";
+import type { Fee, Person, Store } from "./store.ts";
 
 const README = new URL("../README.md", import.meta.url);
 const CODE_RE = /^[23456789A-HJ-NP-Z]{6}$/;
@@ -138,10 +138,19 @@ function viewFor(store: Store, code: string, me: Person): HouseView {
     const shares = [...b.shares]
       .sort((x, y) => byOrder(x.personId, y.personId))
       .map((s) => ({ person: who(s.personId), cents: s.cents }));
-    const items = b.items.map((i) => ({ name: i.name, cents: i.cents, people: [...i.people].sort(byOrder).map(who) }));
+    const items = b.items.map((i) => ({
+      name: i.name,
+      cents: i.cents,
+      people: [...i.people].sort(byOrder).map(who),
+      mine: equalSplit(i.cents, i.people, b.paidBy).find((s) => s.personId === me.id)?.cents,
+    }));
+    // My part of the shared fees is what's left of my share after my lines.
+    const myShare = b.shares.find((s) => s.personId === me.id)?.cents;
+    const myLines = items.reduce((sum, i) => sum + (i.mine ?? 0), 0);
+    const feePart = b.fees.length > 0 && myShare !== undefined ? myShare - myLines : undefined;
     dated.push({
       at: b.at,
-      entry: { kind: "bill", id: b.id, paidBy: who(b.paidBy), note: b.note, shares, items, mine: b.paidBy === me.id },
+      entry: { kind: "bill", id: b.id, paidBy: who(b.paidBy), note: b.note, shares, items, fees: b.fees, feePart, mine: b.paidBy === me.id },
     });
   }
   // A PIN change is about the house's names, so everyone sees it.
@@ -180,38 +189,69 @@ function postedItems(form: URLSearchParams, people: Person[]): DraftItem[] {
       name: normaliseNote(form.get(`item_name_${i}`) ?? "") ?? "",
       price: form.get(`item_price_${i}`) ?? "",
       people: people.filter((p) => form.has(`item_${i}_with_${p.id}`)).map((p) => p.id),
+      off: idFrom(form.get(`item_off_${i}`)) ?? 0,
     });
   }
   return items;
 }
 
-// The form split by item, with each person's share (in house order) and a
-// warning when the lines don't add up to the receipt's total.
-function byItem(draft: Draft, worked: { items: Item[]; shares: Share[] }, people: Person[]): Draft {
-  const cents = new Map(worked.shares.map((s) => [s.personId, s.cents] as const));
-  const shares = people.filter((p) => cents.has(p.id)).map((p) => ({ person: p, cents: cents.get(p.id) ?? 0 }));
-  // Every line counts here, ticked or not: they are all on the paper.
-  const lines = draft.items?.reduce((sum, i) => sum + (parseSignedCents(i.price) ?? 0), 0) ?? 0;
-  const total = parseCents(draft.receiptTotal ?? "");
-  const message =
-    draft.message ??
-    (total !== null && total !== lines
-      ? `The lines add up to ${formatCents(lines)}, but the receipt says ${formatCents(total)}. Check for a misread price.`
-      : undefined);
-  return { ...draft, shares, message };
+// The charges on the whole receipt as the form sent them back.
+function postedFees(form: URLSearchParams): { name: string; price: string }[] {
+  const fees: { name: string; price: string }[] = [];
+  for (let i = 0; i < ITEMS_MAX && form.has(`fee_name_${i}`); i++) {
+    fees.push({ name: normaliseNote(form.get(`fee_name_${i}`) ?? "") ?? "", price: form.get(`fee_price_${i}`) ?? "" });
+  }
+  return fees;
 }
 
-// Each person's share, worked out here from the items and ticks, never taken
-// from the page. A message instead when a price can't be read.
-function workOut(draft: DraftItem[], payerId: number): { items: Item[]; shares: Share[] } | string {
+type Worked = { items: Item[]; fees: Fee[]; shares: Share[] };
+
+// The form split by item, with each person's share (in house order), their
+// part of each line, and whether the lines and fees add up to the receipt.
+function byItem(draft: Draft, worked: Worked, people: Person[], payerId: number): Draft {
+  const cents = new Map(worked.shares.map((s) => [s.personId, s.cents] as const));
+  // Each person's part of each line, the same split the shares are made of.
+  const parts: Record<string, number> = {};
+  draft.items?.forEach((item, i) => {
+    const price = parseSignedCents(item.price);
+    if (price === null) return;
+    for (const s of equalSplit(price, item.people, payerId)) parts[`${i}-${s.personId}`] = s.cents;
+  });
+  const shares = people.filter((p) => cents.has(p.id)).map((p) => ({ person: p, cents: cents.get(p.id) ?? 0 }));
+  // Every line counts here, given to someone or not: they are all on the paper.
+  const lines = worked.items.reduce((sum, i) => sum + i.cents, 0) + worked.fees.reduce((sum, f) => sum + f.cents, 0);
+  const total = parseCents(draft.receiptTotal ?? "");
+  const check =
+    total === null
+      ? undefined
+      : total === lines
+        ? { ok: true, text: `Lines and fees add up to ${formatCents(lines)}, the same as the receipt.` }
+        : { ok: false, text: `Lines and fees add up to ${formatCents(lines)}, but the receipt says ${formatCents(total)}. Check for a misread price.` };
+  return { ...draft, shares, parts, check };
+}
+
+// Each person's share, worked out here from the lines, ticks and fees, never
+// taken from the page. A message instead when an amount can't be read.
+function workOut(draft: Draft, payerId: number, people: Person[]): Worked | string {
   const items: Item[] = [];
-  for (const d of draft) {
+  for (const d of draft.items ?? []) {
     const cents = parseSignedCents(d.price);
     if (cents === null) return `The price of ${d.name === "" ? "a line" : d.name} doesn't look like dollars. Use a number like 4.50.`;
-    // A line ticked on nobody, or costing nothing, isn't part of the bill.
-    if (d.people.length > 0 && cents !== 0) items.push({ name: d.name, cents, people: d.people });
+    // A line nobody had counts as the payer's own, so the bill covers the whole
+    // receipt. A line costing nothing isn't part of it.
+    if (cents !== 0) items.push({ name: d.name, cents, people: d.people.length > 0 ? d.people : [payerId] });
   }
-  return { items, shares: itemShares(items, payerId) };
+  const fees: Fee[] = [];
+  for (const f of draft.fees ?? []) {
+    const cents = parseSignedCents(f.price);
+    if (cents === null) return `The amount for ${f.name === "" ? "a fee" : f.name} doesn't look like dollars. Use a number like 0.25.`;
+    if (cents !== 0) fees.push({ name: f.name, cents });
+  }
+  // In house order, so a fee's leftover cents land on the same person the page shows.
+  const order = new Map(people.map((p, i) => [p.id, i] as const));
+  const byPerson = itemShares(items, payerId).sort((a, b) => (order.get(a.personId) ?? 0) - (order.get(b.personId) ?? 0));
+  const shares = withFees(byPerson, fees.reduce((sum, f) => sum + f.cents, 0), payerId);
+  return { items, fees, shares };
 }
 
 // Tells every open page in the house that something changed, and logs how many heard it.
@@ -372,12 +412,15 @@ async function house(
       amounts: Object.fromEntries(people.map((p) => [p.id, form.get(`amount_${p.id}`) ?? ""] as const)),
       ticked: people.filter((p) => form.has(`with_${p.id}`)).map((p) => p.id),
       items: postedItems(form, people),
+      fees: postedFees(form),
+      gst: idFrom(form.get("gst")) ?? 0,
       receiptTotal: form.get("receipt_total") ?? "",
+      showing: idFrom(form.get("showing")) ?? undefined,
     };
     const again = (message: string): void => {
       logAction(label, me, "rejected", { status: 400, reason: message });
-      const worked = draft.items !== undefined && draft.items.length > 0 ? workOut(draft.items, me.id) : null;
-      const shown = worked === null || typeof worked === "string" ? draft : byItem(draft, worked, people);
+      const worked = draft.items !== undefined && draft.items.length > 0 ? workOut(draft, me.id, people) : null;
+      const shown = worked === null || typeof worked === "string" ? draft : byItem(draft, worked, people, me.id);
       sendHtml(res, 400, billPage(viewFor(store, code, me), { ...shown, message }, scan));
     };
     const note = normaliseNote(draft.note);
@@ -385,15 +428,22 @@ async function house(
 
     // Split by item: the shares come from the items and ticks, and any amounts sent along are ignored.
     if (draft.items !== undefined && draft.items.length > 0) {
-      const worked = workOut(draft.items, me.id);
+      // "Everyone had everything" gives every line to the whole house; "Split
+      // the rest evenly" does that only for lines nobody has yet.
+      const everyone = people.map((p) => p.id);
+      const intent = form.get("intent");
+      for (const item of draft.items) {
+        if (intent === "everyone" || (intent === "rest" && item.people.length === 0)) item.people = everyone;
+      }
+      const worked = workOut(draft, me.id, people);
       if (typeof worked === "string") return again(worked);
-      if (form.get("intent") !== "add") return sendHtml(res, 200, billPage(viewFor(store, code, me), byItem(draft, worked, people), scan));
-      if (worked.shares.every((s) => s.cents === 0)) return again("Tick at least one person on an item.");
+      if (form.get("intent") !== "add") return sendHtml(res, 200, billPage(viewFor(store, code, me), byItem(draft, worked, people, me.id), scan));
+      if (worked.shares.every((s) => s.cents === 0)) return again("There's nothing to split: every line costs $0.00.");
       const below = worked.shares.find((s) => s.cents < 0);
       if (below !== undefined) {
         return again(`${people.find((p) => p.id === below.personId)?.name ?? "Someone"}'s share comes out below zero. Check the discounts.`);
       }
-      const bill = store.addBill(code, me.id, note, worked.shares, worked.items);
+      const bill = store.addBill(code, me.id, note, worked.shares, worked.items, worked.fees);
       if (bill === null) throw new HttpError(400, "That bill couldn't be added.");
       logAction(label, me, "add_bill", { bill, cents: worked.shares.reduce((sum, s) => sum + s.cents, 0) });
       broadcast(store, hub, code);
@@ -452,17 +502,19 @@ async function house(
     });
     if (reading === null) return typeInstead(502, "Serumah couldn't read that receipt. Type the amounts instead.");
     logAction(label, me, "read_receipt", { cents: reading.totalCents, items: reading.items.length });
-    // Every line starts shared by everyone; the payer unticks who didn't have it.
+    // Every line starts with nobody; the payer says who had it, person by person.
     const draft: Draft = {
       note: reading.shop,
       total: "",
       amounts: {},
       ticked: everyone,
-      items: reading.items.map((i) => ({ name: i.name, price: signedPlainCents(i.cents), people: everyone })),
+      items: reading.items.map((i) => ({ name: i.name, price: signedPlainCents(i.cents), people: [], off: i.off })),
+      fees: reading.fees.map((f) => ({ name: f.name, price: signedPlainCents(f.cents) })),
+      gst: reading.gstCents,
       receiptTotal: plainCents(reading.totalCents),
     };
-    const worked = workOut(draft.items ?? [], me.id);
-    const shown = typeof worked === "string" ? { ...draft, message: worked } : byItem(draft, worked, store.people(code));
+    const worked = workOut(draft, me.id, store.people(code));
+    const shown = typeof worked === "string" ? { ...draft, message: worked } : byItem(draft, worked, store.people(code), me.id);
     return sendHtml(res, 200, billPage(viewFor(store, code, me), shown, scan));
   }
   if (method === "POST" && action === "delete") {

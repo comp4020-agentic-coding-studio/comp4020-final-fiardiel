@@ -1,9 +1,10 @@
-import { formatCents } from "./money.ts";
+import { formatCents, parseSignedCents } from "./money.ts";
 import { NAME_MAX, NOTE_MAX } from "./names.ts";
 import type { Person } from "./store.ts";
 
 // A receipt line on the bill form, as the payer left it: the price as typed, and who is ticked.
-export type DraftItem = { name: string; price: string; people: number[] };
+// `off` is how much a discount on the receipt took off this line, in cents.
+export type DraftItem = { name: string; price: string; people: number[]; off?: number };
 // With `items`, the bill is split by item (only after reading a receipt), and
 // `shares` are each person's share worked out from them. Without, it is split by amount.
 export type Draft = {
@@ -12,8 +13,16 @@ export type Draft = {
   amounts: Record<number, string>;
   ticked: number[];
   items?: DraftItem[];
+  // Charges on the whole receipt, shared in proportion; GST is only a note.
+  fees?: { name: string; price: string }[];
+  gst?: number;
   receiptTotal?: string;
+  // Whether the lines and fees add up to the receipt's total, said under the list.
+  check?: { ok: boolean; text: string };
   shares?: { person: Person; cents: number }[];
+  // Each person's part of each line, keyed "<line>-<person id>", and whose list is open.
+  parts?: Record<string, number>;
+  showing?: number;
   message?: string;
 };
 
@@ -24,7 +33,11 @@ export type Entry =
       paidBy: Person;
       note: string;
       shares: { person: Person; cents: number }[];
-      items?: { name: string; cents: number; people: Person[] }[];
+      // `mine` is the viewer's part of the line, when they had it.
+      items?: { name: string; cents: number; people: Person[]; mine?: number }[];
+      // Charges on the whole receipt, and the viewer's part of them.
+      fees?: { name: string; cents: number }[];
+      feePart?: number;
       mine: boolean;
     }
   | { kind: "payment"; id: number; from: Person; to: Person; cents: number; toMe: boolean }
@@ -193,15 +206,94 @@ const STYLE = `
   .row input:not([type="checkbox"]), .split input { text-align: right; }
   .split { display: grid; grid-template-columns: 1fr auto; align-items: end; gap: 0.75rem; margin: 0; }
   .split label { margin: 0; font-size: 0.875rem; line-height: 1.4; color: var(--muted); }
-  /* A receipt line: its name and price box, then who shares it. */
-  .item { display: grid; grid-template-columns: 1fr 6.5rem; align-items: center; gap: 0.375rem 0.75rem; padding: 0.625rem 0; border-bottom: 1px solid var(--rule); }
-  .item-name { overflow-wrap: anywhere; }
-  .item input:not([type="checkbox"]) { text-align: right; }
-  .ticks { grid-column: 1 / -1; display: flex; flex-wrap: wrap; gap: 0.375rem 1rem; margin: 0; font-size: 0.875rem; }
-  .ticks label { display: inline-flex; align-items: center; gap: 0.375rem; }
-  .shares { list-style: none; padding: 0; margin: 0; font-variant-numeric: tabular-nums; }
-  .shares li { display: flex; justify-content: space-between; gap: 1rem; padding: 0.375rem 0; border-bottom: 1px solid var(--rule); }
-  .bought summary { margin-top: 0.75rem; color: var(--muted); font-size: 0.85rem; cursor: pointer; }
+  /* Splitting a receipt person by person. The housemates are big faces; the
+     one picked gets a ring in their colour, with each person's share under
+     their face. Below is the one receipt for whoever is picked: tap a line to
+     give it to them, and it glows in their colour. Each line carries a small
+     stack of the faces of everyone who has it so far. */
+  .people-pick { display: grid; grid-template-columns: repeat(var(--n), minmax(0, 1fr)); gap: 0.25rem; border: 0; padding: 0; margin: 0; min-width: 0; }
+  .pick { display: flex; min-width: 0; }
+  .pick input { position: absolute; width: 1px; height: 1px; opacity: 0; }
+  .pick-body { flex: 1; min-width: 0; display: flex; flex-direction: column; align-items: center; gap: 0.3rem; padding: 0.375rem 0; font-size: 0.75rem; color: var(--muted); cursor: pointer; }
+  .pick-body .avatar { width: 2.75rem; height: 2.75rem; transition: box-shadow 0.15s, transform 0.15s; }
+  .pick-body .avatar::before { font-size: 1.1rem; }
+  .pick input:checked + .pick-body { color: var(--ink); font-weight: 650; }
+  .pick input:checked + .pick-body .avatar { box-shadow: 0 0 0 3px var(--card), 0 0 0 6px var(--av); transform: scale(1.06); }
+  .pick input:focus-visible + .pick-body .avatar { outline: 2px solid var(--accent); outline-offset: 8px; }
+  .pick-name { max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .pick-body .amt { font-weight: 700; font-variant-numeric: tabular-nums; color: var(--ink); }
+  .panel { display: none; flex-direction: column; gap: 0.125rem; margin: 0 -0.75rem; }
+  .line-row { display: grid; grid-template-columns: 1fr auto; align-items: center; gap: 0.35rem 0.75rem; padding: 0.7rem 0.75rem; border-radius: 14px; cursor: pointer; transition: background-color 0.15s; }
+  .line-row input { position: absolute; width: 1px; height: 1px; opacity: 0; }
+  .line-row:has(input:checked) { background: color-mix(in srgb, var(--av) 16%, transparent); }
+  .line-row:has(input:focus-visible) { outline: 2px solid var(--accent); outline-offset: -2px; }
+  .line-row .item-name { min-width: 0; overflow-wrap: anywhere; }
+  .line-row .price { justify-self: end; font-variant-numeric: tabular-nums; }
+  .stack { grid-column: 1 / -1; display: flex; align-items: center; gap: 0.6rem; min-height: 1.6rem; }
+  .faces { display: flex; align-items: center; }
+  .stack .avatar { width: 1.6rem; height: 1.6rem; box-shadow: 0 0 0 2px var(--card); }
+  .stack .avatar::before { font-size: 0.65rem; }
+  .stack .avatar + .avatar { margin-left: -0.35rem; }
+  .stack .avatar.pop { animation: pop 0.2s ease-out; }
+  .nobody-yet { width: 1.6rem; height: 1.6rem; border-radius: 50%; border: 1.5px dashed color-mix(in srgb, var(--muted) 60%, transparent); }
+  .line-row .part { font-size: 0.78rem; color: var(--muted); }
+  .line-row .was { grid-column: 1 / -1; margin-top: -0.25rem; font-size: 0.78rem; color: var(--muted); }
+  @keyframes pop { from { transform: scale(0.4); } to { transform: scale(1); } }
+  .extras { display: flex; flex-direction: column; gap: 0.25rem; padding: 0.75rem 0.875rem; border-radius: 14px; background: color-mix(in srgb, var(--ink) 6%, transparent); font-size: 0.875rem; }
+  .extras-title { font-weight: 650; }
+  .extras-row { display: flex; justify-content: space-between; gap: 0.75rem; }
+  .check { display: flex; align-items: flex-start; gap: 0.4rem; margin: 0; font-size: 0.85rem; color: var(--muted); }
+  .check svg { flex: none; width: 1.1rem; height: 1.1rem; margin-top: 0.1rem; color: var(--accent); }
+  .check.off { color: var(--ink); font-weight: 600; }
+  .quiet-actions { display: flex; flex-wrap: wrap; align-items: flex-start; gap: 0.5rem; }
+  .chip-btn { display: inline-flex; align-items: center; min-height: 2.25rem; padding: 0 0.9rem; border: 1.5px solid var(--rule); border-radius: 999px; background: transparent; color: var(--accent); font-size: 0.875rem; font-weight: 600; text-decoration: none; cursor: pointer; list-style: none; }
+  .chip-btn::-webkit-details-marker { display: none; }
+  /* Open, Fix a price takes the whole row, below the other pills. */
+  .fix[open] { flex-basis: 100%; order: 1; }
+  .fix[open] summary { border-color: var(--accent); }
+  .fix-body { margin-top: 0.5rem; }
+  /* The bar at the bottom: how many lines are left, and Add bill, always in reach. */
+  .dock { position: sticky; bottom: 0; z-index: 1; display: flex; flex-direction: column; gap: 0.625rem; margin: 0 -1.25rem -1.25rem; padding: 0.75rem 1.25rem calc(0.75rem + env(safe-area-inset-bottom, 0px)); border-top: 1px solid var(--rule); border-radius: 0 0 18px 18px; background: var(--card); }
+  .dock-text { flex: 1; min-width: 0; font-size: 0.82rem; color: var(--muted); line-height: 1.35; }
+  .dock-text strong { display: block; color: var(--ink); font-size: 0.95rem; font-weight: 650; }
+  .dock-main { display: flex; align-items: center; gap: 0.75rem; }
+  .dock-main button { flex: none; }
+  .dock .wide { width: 100%; display: inline-flex; align-items: center; justify-content: center; gap: 0.4rem; }
+  .dock .wide svg, .chip-btn svg { width: 1.1rem; height: 1.1rem; }
+  .chip-btn { gap: 0.35rem; }
+  .ring { --p: 0; flex: none; width: 2.5rem; height: 2.5rem; border-radius: 50%; background: conic-gradient(var(--accent) calc(var(--p) * 1turn), var(--rule) 0); display: inline-flex; align-items: center; justify-content: center; }
+  .ring::after { content: ""; width: 1.85rem; height: 1.85rem; border-radius: 50%; background: var(--card); }
+  /* Adding the receipt: one big button, then a small receipt being read. */
+  .card-title { margin: 0; font-weight: 650; }
+  .drop { display: flex; flex-direction: column; align-items: center; gap: 0.6rem; padding: 1.5rem 1rem; border: 2px dashed color-mix(in srgb, var(--muted) 45%, transparent); border-radius: 18px; text-align: center; cursor: pointer; }
+  .drop input { position: absolute; width: 1px; height: 1px; opacity: 0; }
+  .drop:has(input:focus-visible) { outline: 2px solid var(--accent); outline-offset: 2px; }
+  .drop.over { border-color: var(--accent); background: color-mix(in srgb, var(--accent) 8%, transparent); }
+  .drop strong { font-size: 1.05rem; }
+  .cam { width: 3.5rem; height: 3.5rem; border-radius: 50%; background: var(--accent); color: var(--on-accent); display: inline-flex; align-items: center; justify-content: center; }
+  .cam svg { width: 1.6rem; height: 1.6rem; }
+  .reading { display: flex; flex-direction: column; align-items: center; gap: 0.75rem; padding: 0.5rem 0; text-align: center; }
+  .reading p { margin: 0; max-width: 17rem; }
+  .slip { position: relative; width: 9rem; padding: 0.9rem 0.8rem 1.4rem; background: #f3f1ec; border-radius: 4px 4px 0 0; overflow: hidden; display: grid; gap: 0.45rem; --zig: 0.5rem; mask: linear-gradient(#000 0 0) top / 100% calc(100% - var(--zig)) no-repeat, conic-gradient(from -45deg at bottom, #0000, #000 1deg 89deg, #0000 90deg) bottom / calc(var(--zig) * 2) var(--zig) repeat-x; }
+  .slip i { display: block; height: 0.4rem; border-radius: 2px; background: #8d929c; opacity: 0.55; }
+  .slip i.short { width: 60%; }
+  .slip i.mid { width: 80%; }
+  /* The scanner: a bright line with a glow, passing down the receipt and back. */
+  .slip .beam { position: absolute; left: -0.5rem; right: -0.5rem; top: 0; height: 3px; background: var(--accent); box-shadow: 0 0 10px 3px color-mix(in srgb, var(--accent) 70%, transparent), 0 -18px 18px 2px color-mix(in srgb, var(--accent) 25%, transparent); animation: beam 1.5s ease-in-out infinite alternate; }
+  @keyframes beam { from { top: 4%; } to { top: 88%; } }
+  @keyframes busy { from { opacity: 0.25; } to { opacity: 0.75; } }
+  .fix .price-row { display: grid; grid-template-columns: 1fr 6.5rem; align-items: center; gap: 0.75rem; padding: 0.375rem 0; border-bottom: 1px solid var(--rule); }
+  .fix .price-row span { min-width: 0; overflow-wrap: anywhere; font-size: 0.9rem; }
+  .fix input { text-align: right; font-variant-numeric: tabular-nums; }
+  @media (prefers-reduced-motion: reduce) { .pick-body .avatar, .line-row { transition: none; } .stack .avatar.pop { animation: none; }
+    /* Without movement, the scanner holds still and the lines gently pulse, so it still reads as busy. */
+    .slip .beam { animation: none; top: 46%; }
+    .slip i { animation: busy 0.9s ease-in-out infinite alternate; }
+  }
+  .grid-foot { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 0.75rem; }
+  .bought { margin-top: 0.75rem; }
+  .bought-title { margin: 0; font-size: 0.85rem; font-weight: 650; }
+  .bought summary { margin-top: 0.625rem; color: var(--muted); font-size: 0.85rem; cursor: pointer; }
   .bought ul { list-style: none; padding: 0; margin: 0.375rem 0 0; font-size: 0.875rem; }
   .bought li { display: flex; flex-wrap: wrap; gap: 0 0.5rem; padding: 0.375rem 0; border-bottom: 1px solid var(--rule); }
   .bought .item-name { flex: 1; }
@@ -251,6 +343,9 @@ const STYLE = `
   }
 `;
 
+// Each page's script runs in its own function: after a receipt is read, the
+// result page replaces the bill page in the same window, and a second
+// top-level `const form` there would stop the new page's script.
 export function layout(title: string, body: string, script = ""): string {
   return `<!doctype html>
 <html lang="en-AU">
@@ -265,7 +360,7 @@ export function layout(title: string, body: string, script = ""): string {
 ${body}
       <p class="quiet"><a href="/readme/">About this app</a></p>
     </main>
-    ${script === "" ? "" : `<script>${script}</script>`}
+    ${script === "" ? "" : `<script>(() => {${script}})();</script>`}
   </body>
 </html>
 `;
@@ -495,16 +590,34 @@ function entryLine(entry: Entry, base: string, me: Person): string {
   const remove = entry.mine
     ? `<details class="confirm" data-bill="${entry.id}"><summary>${ICON_DELETE}<span class="closed">Delete</span><span class="opened">Cancel</span></summary><div class="ask"><p>Delete this bill for everyone?</p>${postForm(`${base}/delete`, { bill: String(entry.id) }, "Yes, delete", "danger", ICON_DELETE)}</div></details>`
     : "";
-  // A bill split by item shows what was in it, so a share comes with its reason.
-  const bought =
-    entry.items === undefined || entry.items.length === 0
+  // A bill split by item gives each share its reason: first the lines you had
+  // and your part of each, then the whole receipt with who had every line.
+  const items = entry.items ?? [];
+  const mine = items.filter((i) => i.mine !== undefined);
+  const myLines = mine
+    .map(
+      (i) =>
+        `<li><span class="item-name">${esc(i.name)}</span><span class="price">${formatCents(i.mine ?? 0)}</span><span class="people">${i.people.length === 1 ? "Just you" : `Your part of ${formatCents(i.cents)}, with ${i.people.filter((p) => p.id !== me.id).map((p) => esc(p.name)).join(", ")}`}</span></li>`,
+    )
+    .join("");
+  const whole = items
+    .map(
+      (i) =>
+        `<li><span class="item-name">${esc(i.name)}</span><span class="price">${formatCents(i.cents)}</span><span class="people">${i.people.map(name).join(", ")}</span></li>`,
+    )
+    .join("");
+  const fees = entry.fees ?? [];
+  const feeLine =
+    entry.feePart === undefined || entry.feePart === 0
       ? ""
-      : `<details class="bought"><summary>What was bought</summary><ul>${entry.items
-          .map(
-            (i) =>
-              `<li><span class="item-name">${esc(i.name)}</span><span class="price">${formatCents(i.cents)}</span><span class="people">${i.people.map(name).join(", ")}</span></li>`,
-          )
-          .join("")}</ul></details>`;
+      : `<li><span class="item-name">Shared fees</span><span class="price">${formatCents(entry.feePart)}</span><span class="people">Your part of ${fees.map((f) => esc(f.name)).join(", ")}, in proportion to what you had</span></li>`;
+  const wholeFees = fees
+    .map((f) => `<li><span class="item-name">${esc(f.name)}</span><span class="price">${formatCents(f.cents)}</span><span class="people">Shared by everyone, in proportion</span></li>`)
+    .join("");
+  const bought =
+    items.length === 0
+      ? ""
+      : `<div class="bought">${mine.length === 0 ? "" : `<p class="bought-title">What you had</p><ul>${myLines}${feeLine}</ul>`}<details><summary>The whole receipt</summary><ul>${whole}${wholeFees}</ul></details></div>`;
   return `<li class="bill"><div class="line"><span class="pill bill">Bill</span><span class="what">${entry.note === "" ? "Bill" : esc(entry.note)}</span><span class="total">${formatCents(total)}</span></div><div class="by">${avatar(entry.paidBy, "small")}${name(entry.paidBy)} paid</div><ul class="chips">${chips}</ul>${bought}${remove}</li>`;
 }
 
@@ -574,57 +687,34 @@ export function historyPage(view: HouseView): string {
   );
 }
 
+const ICON_CAMERA = `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round" aria-hidden="true"><path d="M3 8h3.5L8 5.5h8L17.5 8H21v11H3z"/><circle cx="12" cy="13.5" r="3.5"/></svg>`;
+const ICON_EVEN = `<svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><circle cx="5" cy="10" r="2.2"/><circle cx="10" cy="10" r="2.2"/><circle cx="15" cy="10" r="2.2"/></svg>`;
+const ICON_TICK = `<svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="2.2" aria-hidden="true"><circle cx="10" cy="10" r="8"/><path d="M6.5 10.2l2.4 2.4 4.6-4.8"/></svg>`;
+
+// The receipt upload: one big button that opens the phone's own Take Photo or
+// Photo Library menu. With script, choosing a photo sends it straight away and
+// the card shows a small receipt being read; without, "Read receipt" sends it.
+function receiptCard(base: string): string {
+  return `<form class="card receipt-card" method="post" action="${esc(base)}/receipt" enctype="multipart/form-data" data-receipt>
+        <p class="card-title">Got a receipt?</p>
+        <label class="drop"><input type="file" name="photo" accept="image/jpeg,image/png,image/webp,image/gif" required /><span class="cam">${ICON_CAMERA}</span><strong>Add the receipt</strong><span class="quiet">Take a photo, or choose one you've taken</span></label>
+        <button type="submit" class="secondary" data-read>Read receipt</button>
+        <div class="reading" aria-live="polite" hidden><div class="slip" aria-hidden="true"><i class="mid"></i><i></i><i class="short"></i><i></i><i class="mid"></i><i class="short"></i><i></i><i class="mid"></i><span class="beam"></span></div><p><strong>Reading the receipt</strong></p><p class="quiet">This takes a few seconds. You'll check every line before anything is added.</p></div>
+      </form>`;
+}
+
 // `scan` is whether this house may read receipts; other houses never see the upload.
 export function billPage(view: HouseView, draft?: Draft, scan = false): string {
   const base = `/h/${view.code}`;
   const d = draft ?? { note: "", total: "", amounts: {}, ticked: view.people.map((p) => p.id) };
+  const byItem = d.items !== undefined && d.items.length > 0;
+  if (byItem) return splitPage(view, d, base);
   const rows = view.people
     .map(
       (p) =>
         `<p class="row"><label><input type="checkbox" name="with_${p.id}"${d.ticked.includes(p.id) ? " checked" : ""} /> ${esc(p.name)}</label> <input name="amount_${p.id}" inputmode="decimal" size="8" autocomplete="off" value="${esc(d.amounts[p.id] ?? "")}" aria-label="${esc(p.name)}'s amount" /></p>`,
     )
     .join("\n          ");
-  const receipt = scan
-    ? `<form class="card" method="post" action="${esc(base)}/receipt" enctype="multipart/form-data">
-        <label>Photo of the receipt <input type="file" name="photo" accept="image/jpeg,image/png,image/webp,image/gif" required /></label>
-        <button type="submit" class="secondary">Read receipt</button>
-      </form>`
-    : "";
-  const byItem = d.items !== undefined && d.items.length > 0;
-  // Read off a receipt: one row per line, with a price box and who shares it.
-  const itemRows = (d.items ?? [])
-    .map(
-      (item, i) =>
-        `<div class="item" role="group" aria-labelledby="item-${i}"><span class="item-name" id="item-${i}">${esc(item.name)}</span><input type="hidden" name="item_name_${i}" value="${esc(item.name)}" /><input name="item_price_${i}" inputmode="decimal" autocomplete="off" value="${esc(item.price)}" aria-label="Price of ${esc(item.name)}" /><p class="ticks">${view.people
-          .map(
-            (p) =>
-              `<label><input type="checkbox" name="item_${i}_with_${p.id}"${item.people.includes(p.id) ? " checked" : ""} /> ${esc(p.name)}</label>`,
-          )
-          .join("")}</p></div>`,
-    )
-    .join("\n          ");
-  const split = byItem
-    ? `<fieldset>
-          <legend>What was bought, and who shares each thing</legend>
-          <p class="quiet">Read from the receipt. Fix any price that's wrong, and untick anyone who didn't have it. Untick everyone to leave a line out.</p>
-          ${itemRows}
-        </fieldset>
-        <fieldset>
-          <legend>Each person's share</legend>
-          <ul class="shares">${(d.shares ?? []).map((s) => `<li><span>${esc(s.person.name)}</span> <span>${formatCents(s.cents)}</span></li>`).join("")}</ul>
-        </fieldset>
-        <input type="hidden" name="receipt_total" value="${esc(d.receiptTotal ?? "")}" />
-        <button type="submit" name="intent" value="add">Add bill</button>
-        <p class="split"><span class="quiet">Changed a price or a tick?</span>
-        <button type="submit" name="intent" value="items" class="secondary">Work out shares</button></p>
-        <p class="quiet"><a href="${esc(base)}/bill">Type the bill in instead</a></p>`
-    : `<fieldset>
-          <legend>Who owes what (in dollars)</legend>
-          ${rows}
-        </fieldset>
-        <button type="submit" name="intent" value="add">Add bill</button>
-        <p class="split"><label>Or split a total equally between the ticked people <input name="total" inputmode="decimal" size="8" autocomplete="off" value="${esc(d.total)}" /></label>
-        <button type="submit" name="intent" value="fill" class="secondary">Split equally</button></p>`;
   // "Add bill" comes first so pressing Enter in a box adds the bill rather
   // than refilling the form.
   return layout(
@@ -632,14 +722,274 @@ export function billPage(view: HouseView, draft?: Draft, scan = false): string {
     `${houseTop(view)}
       ${backLink(view.code)}
       <h2 class="page">Add a bill you paid</h2>
-      ${receipt}
+      ${scan ? receiptCard(base) : ""}
       <form class="card" method="post" action="${esc(base)}/bill">
+        ${scan ? `<p class="card-title">No receipt? Type it in</p>` : ""}
         ${alertLine(d.message)}
         <label>What for <input name="note" maxlength="${NOTE_MAX}" autocomplete="off" value="${esc(d.note)}" /></label>
-        ${split}
+        <fieldset>
+          <legend>Who owes what (in dollars)</legend>
+          ${rows}
+        </fieldset>
+        <button type="submit" name="intent" value="add">Add bill</button>
+        <p class="split"><label>Or split a total equally between the ticked people <input name="total" inputmode="decimal" size="8" autocomplete="off" value="${esc(d.total)}" /></label>
+        <button type="submit" name="intent" value="fill" class="secondary">Split equally</button></p>
       </form>`,
+    scan ? RECEIPT_SCRIPT : "",
   );
 }
+
+// A receipt split person by person: pick a housemate, then tap the lines they
+// had. Each line carries a stack of the faces of who has it so far, fees on the
+// whole receipt are shared in proportion, and a bar at the bottom says how
+// many lines are left, beside Add bill.
+function splitPage(view: HouseView, d: Draft, base: string): string {
+  const items = d.items ?? [];
+  const fees = d.fees ?? [];
+  const shareOf = new Map((d.shares ?? []).map((s) => [s.person.id, s.cents] as const));
+  const showing = view.people.some((p) => p.id === d.showing) ? d.showing : view.people[0]?.id;
+  const byId = new Map(view.people.map((p) => [p.id, p] as const));
+  const partText = (i: number, p: Person): string => {
+    const sharing = items[i].people.length;
+    if (sharing === 0) return "Nobody yet";
+    const cents = d.parts?.[`${i}-${p.id}`];
+    if (cents === undefined) return "";
+    return sharing === 1 ? `All ${formatCents(cents)}` : `${formatCents(cents)}, split ${sharing} ways`;
+  };
+  // Who has a line so far, as a little stack of their faces, then the picked person's part.
+  const stack = (i: number): string =>
+    items[i].people.length === 0
+      ? `<span class="nobody-yet"></span>`
+      : items[i].people.map((id) => byId.get(id)).filter((p) => p !== undefined).map((p) => avatar(p, "small")).join("");
+  const money = (price: string): string => {
+    const cents = parseSignedCents(price);
+    return cents === null ? esc(price) : formatCents(cents);
+  };
+  const was = (item: DraftItem): string => {
+    const cents = parseSignedCents(item.price);
+    return item.off !== undefined && item.off > 0 && cents !== null
+      ? `<span class="was">Was ${formatCents(cents + item.off)}, ${formatCents(item.off)} off</span>`
+      : "";
+  };
+  // One list per housemate; only the picked one shows (by CSS, so it works
+  // without script). Tapping a line gives it to that person, or takes it back.
+  const panels = view.people
+    .map(
+      (p) =>
+        `<div class="panel" id="panel-${p.id}" style="--av: ${AVATARS[p.id % AVATARS.length]}" role="group" aria-label="${p.id === view.me.id ? "What you had" : `What ${esc(p.name)} had`}">${items
+          .map(
+            (item, i) =>
+              `<label class="line-row"><input type="checkbox" name="item_${i}_with_${p.id}" data-i="${i}" data-p="${p.id}"${item.people.includes(p.id) ? " checked" : ""} /><span class="item-name">${esc(item.name)}</span><span class="price" data-price-of="${i}">${money(item.price)}</span>${was(item)}<span class="stack"><span class="faces" data-stack="${i}">${stack(i)}</span><span class="part" data-part="${i}-${p.id}">${partText(i, p)}</span></span></label>`,
+          )
+          .join("")}</div>`,
+    )
+    .join("\n          ");
+  const showRules = view.people.map((p) => `.by-item:has(#show-${p.id}:checked) #panel-${p.id} { display: flex; }`).join("\n");
+  const hidden = [
+    ...items.map(
+      (item, i) =>
+        `<input type="hidden" name="item_name_${i}" value="${esc(item.name)}" /><input type="hidden" name="item_off_${i}" value="${item.off ?? 0}" />`,
+    ),
+    ...fees.map((fee, i) => `<input type="hidden" name="fee_name_${i}" value="${esc(fee.name)}" />`),
+    `<input type="hidden" name="receipt_total" value="${esc(d.receiptTotal ?? "")}" />`,
+    `<input type="hidden" name="gst" value="${d.gst ?? 0}" />`,
+  ].join("");
+  const priceRow = (name: string, field: string, price: string, data: string): string =>
+    `<label class="price-row"><span>${esc(name)}</span><input name="${field}" ${data} inputmode="decimal" autocomplete="off" value="${esc(price)}" aria-label="Price of ${esc(name)}" /></label>`;
+  const prices = [
+    ...items.map((item, i) => priceRow(item.name, `item_price_${i}`, item.price, `data-price="${i}"`)),
+    ...fees.map((fee, i) => priceRow(fee.name, `fee_price_${i}`, fee.price, `data-fee="${i}"`)),
+  ].join("");
+  const extras =
+    fees.length === 0 && !d.gst
+      ? ""
+      : `<div class="extras">${
+          fees.length === 0
+            ? ""
+            : `<span class="extras-title">Shared by everyone</span>${fees.map((fee, i) => `<span class="extras-row"><span>${esc(fee.name)}</span><span class="money" data-fee-amt="${i}">${money(fee.price)}</span></span>`).join("")}`
+        }<span class="quiet">${fees.length === 0 ? "" : "Split in proportion to what each person had. "}${d.gst ? `GST of ${formatCents(d.gst)} is already in the prices.` : ""}</span></div>`;
+  const check = d.check === undefined ? "" : `<p class="check${d.check.ok ? "" : " off"}" aria-live="polite" data-check>${d.check.ok ? ICON_TICK : ""}<span>${esc(d.check.text)}</span></p>`;
+  const unsplit = items.filter((i) => i.people.length === 0);
+  const leftCents = unsplit.reduce((sum, i) => sum + (parseSignedCents(i.price) ?? 0), 0);
+  const doneShare = items.length === 0 ? 1 : (items.length - unsplit.length) / items.length;
+  return layout(
+    "Add a bill",
+    `${houseTop(view)}
+      ${backLink(view.code)}
+      <h2 class="page">Add a bill you paid</h2>
+      <form class="card by-item" method="post" action="${esc(base)}/bill" data-payer="${view.me.id}">
+        <style>${showRules}</style>
+        ${alertLine(d.message)}
+        <label>What for <input name="note" maxlength="${NOTE_MAX}" autocomplete="off" value="${esc(d.note)}" /></label>
+        <fieldset class="people-pick" style="--n: ${view.people.length}">
+          <legend class="sr">Whose lines to show</legend>
+          ${view.people
+            .map(
+              (p) =>
+                `<label class="pick" style="--av: ${AVATARS[p.id % AVATARS.length]}"><input type="radio" name="showing" value="${p.id}" id="show-${p.id}"${p.id === showing ? " checked" : ""} /><span class="pick-body">${avatar(p)}<span class="pick-name">${p.id === view.me.id ? "You" : esc(p.name)}</span> <span class="amt" data-share="${p.id}">${formatCents(shareOf.get(p.id) ?? 0)}</span></span></label>`,
+            )
+            .join("")}
+        </fieldset>
+        <div class="quiet-actions"><button type="submit" name="intent" value="everyone" class="chip-btn" data-all>${ICON_EVEN}Everyone had everything</button></div>
+        <p class="quiet">Pick a housemate, then tap the lines they had.</p>
+        ${panels}
+        ${extras}
+        ${check}
+        ${hidden}
+        <div class="quiet-actions"><details class="fix"><summary class="chip-btn">Fix a price</summary><div class="fix-body">${prices}</div></details><a class="chip-btn" href="${esc(base)}/bill">Type it in instead</a><button type="submit" name="intent" value="items" class="chip-btn" data-recalc>Work out shares</button></div>
+        <div class="dock"><button type="submit" name="intent" value="rest" class="secondary wide" data-rest${unsplit.length === 0 ? " hidden" : ""}>${ICON_EVEN}Split the rest evenly</button><div class="dock-main"><span class="ring" style="--p: ${doneShare.toFixed(3)}" aria-hidden="true" data-ring></span><span class="dock-text" aria-live="polite"><strong data-left>${unsplit.length === 0 ? "Every line is split" : `${unsplit.length} ${unsplit.length === 1 ? "line" : "lines"} left`}</strong><span data-left-note>${unsplit.length === 0 ? "Ready to add" : `${formatCents(leftCents)} counts as yours until it's given to someone`}</span></span><button type="submit" name="intent" value="add">Add bill</button></div></div>
+      </form>`,
+    SPLIT_SCRIPT,
+  );
+}
+
+// With script, choosing or dropping a photo sends it at once, and the card
+// shows the receipt being read while the page waits for Claude.
+const RECEIPT_SCRIPT = `
+  const form = document.querySelector("form[data-receipt]");
+  const input = form.querySelector("input[type=file]");
+  const drop = form.querySelector(".drop");
+  // The photo goes in the background, so this page keeps drawing the scanner
+  // while Claude reads (Safari stops animating a page once a form submits).
+  // The answer is the next page, so it replaces this one.
+  const read = async () => {
+    drop.hidden = true;
+    form.querySelector(".reading").hidden = false;
+    try {
+      const res = await fetch(form.action, { method: "POST", body: new FormData(form) });
+      const html = await res.text();
+      document.open();
+      document.write(html);
+      document.close();
+    } catch {
+      form.submit();
+    }
+  };
+  form.querySelector("[data-read]").hidden = true;
+  input.addEventListener("change", () => { if (input.files.length > 0) read(); });
+  drop.addEventListener("dragover", (event) => { event.preventDefault(); drop.classList.add("over"); });
+  drop.addEventListener("dragleave", () => drop.classList.remove("over"));
+  drop.addEventListener("drop", (event) => {
+    event.preventDefault();
+    drop.classList.remove("over");
+    if (event.dataTransfer.files.length === 0) return;
+    input.files = event.dataTransfer.files;
+    read();
+  });
+`;
+
+// With script, the shares, each line's faces, the fees, the total check and
+// the bar at the bottom update as lines are tapped, so "Work out shares" isn't
+// needed. This is only what the page shows: on Add bill the server works it
+// all out again from the ticks and prices, by the same rules: each line split
+// equally between who had it (leftover cents to the payer if they had it, else
+// the first), a line nobody had is the payer's, and fees are shared in
+// proportion (leftover cents to the payer if on the bill, else the first).
+const SPLIT_SCRIPT = `
+  const form = document.querySelector("form.by-item");
+  const payer = form.dataset.payer;
+  const people = [...form.querySelectorAll("[data-share]")].map((el) => el.dataset.share);
+  const faceOf = Object.fromEntries(people.map((p) => [p, form.querySelector("#show-" + p + " + .pick-body .avatar")]));
+  const money = new Intl.NumberFormat("en-AU", { style: "currency", currency: "AUD" });
+  const show = (c) => money.format(c / 100);
+  const cents = (raw) => {
+    const m = raw.trim().match(/^(-?)\\$?(\\d{1,7})(?:\\.(\\d{1,2}))?$/);
+    return m === null ? null : (m[1] ? -1 : 1) * (Number(m[2]) * 100 + Number((m[3] ?? "").padEnd(2, "0")));
+  };
+  const receipt = cents(form.querySelector("[name=receipt_total]").value);
+  function update(tapped) {
+    const sums = Object.fromEntries(people.map((p) => [p, 0]));
+    let lines = 0, left = 0, leftCents = 0, count = 0, unreadable = false;
+    for (const input of form.querySelectorAll("[data-price]")) {
+      const i = input.dataset.price;
+      const c = cents(input.value);
+      count += 1;
+      const who = people.filter((p) => form.querySelector('input[data-i="' + i + '"][data-p="' + p + '"]').checked);
+      if (c === null) unreadable = true; else lines += c;
+      if (who.length === 0) { left += 1; leftCents += c ?? 0; if (c !== null) sums[payer] += c; }
+      const base = c === null || who.length === 0 ? 0 : Math.floor(c / who.length);
+      const gets = who.includes(payer) ? payer : who[0];
+      for (const p of people) {
+        const part = form.querySelector('[data-part="' + i + "-" + p + '"]');
+        const row = part.closest(".line-row");
+        row.querySelector(".price").textContent = c === null ? input.value : show(c);
+        row.querySelector("[data-stack]").replaceChildren(...(who.length === 0 ? [Object.assign(document.createElement("span"), { className: "nobody-yet" })] : who.map((w) => {
+          const face = faceOf[w].cloneNode(true);
+          face.classList.add("small");
+          if ([].concat(tapped ?? []).some((t) => t.i === i && t.p === w)) face.classList.add("pop");
+          return face;
+        })));
+        if (c === null) { part.textContent = "Check this price under Fix a price"; continue; }
+        if (who.length === 0) { part.textContent = "Nobody yet"; continue; }
+        if (!who.includes(p)) { part.textContent = ""; continue; }
+        const mine = base + (p === gets ? c - base * who.length : 0);
+        sums[p] += mine;
+        part.textContent = who.length === 1 ? "All " + show(mine) : show(mine) + ", split " + who.length + " ways";
+      }
+    }
+    let fee = 0;
+    for (const input of form.querySelectorAll("[data-fee]")) {
+      const c = cents(input.value);
+      if (c === null) unreadable = true; else fee += c;
+      const shown = form.querySelector('[data-fee-amt="' + input.dataset.fee + '"]');
+      if (shown) shown.textContent = c === null ? input.value : show(c);
+    }
+    lines += fee;
+    const base = people.reduce((s, p) => s + sums[p], 0);
+    if (fee !== 0) {
+      if (base <= 0) sums[payer] += fee;
+      else {
+        const sign = Math.sign(fee);
+        const on = people.filter((p) => sums[p] !== 0);
+        let given = 0;
+        const before = { ...sums };
+        for (const p of on) { const c = sign * Math.floor((Math.abs(fee) * Math.max(before[p], 0)) / base); sums[p] += c; given += c; }
+        sums[on.includes(payer) ? payer : on[0]] += fee - given;
+      }
+    }
+    for (const p of people) form.querySelector('[data-share="' + p + '"]').textContent = show(sums[p]);
+    const check = form.querySelector("[data-check]");
+    if (check && receipt !== null && !unreadable) {
+      const ok = lines === receipt;
+      check.classList.toggle("off", !ok);
+      check.querySelector("svg")?.toggleAttribute("hidden", !ok);
+      check.querySelector("span").textContent = ok
+        ? "Lines and fees add up to " + show(lines) + ", the same as the receipt."
+        : "Lines and fees add up to " + show(lines) + ", but the receipt says " + show(receipt) + ". Check for a misread price.";
+    }
+    form.querySelector("[data-ring]").style.setProperty("--p", count === 0 ? 1 : (count - left) / count);
+    form.querySelector("[data-left]").textContent = left === 0 ? "Every line is split" : left + (left === 1 ? " line" : " lines") + " left";
+    form.querySelector("[data-left-note]").textContent = left === 0 ? "Ready to add" : show(leftCents) + " counts as yours until it's given to someone";
+    form.querySelector("[data-rest]").hidden = left === 0;
+  }
+  // The two quick ways to share evenly: every line to everyone, or only the
+  // lines nobody has yet. The faces that join a line pop on.
+  function share(all) {
+    const fresh = [];
+    for (const input of form.querySelectorAll("[data-price]")) {
+      const i = input.dataset.price;
+      const boxes = [...form.querySelectorAll('input[data-i="' + i + '"]')];
+      if (!all && boxes.some((b) => b.checked)) continue;
+      for (const b of boxes) if (!b.checked) { b.checked = true; fresh.push({ i, p: b.dataset.p }); }
+    }
+    update(fresh);
+  }
+  form.addEventListener("click", (event) => {
+    const button = event.target.closest("[data-all], [data-rest]");
+    if (!button) return;
+    event.preventDefault();
+    share(button.matches("[data-all]"));
+  });
+  // Enter in a box shouldn't press the first button on the page ("Everyone had everything").
+  form.addEventListener("keydown", (event) => {
+    if (event.key === "Enter" && event.target.matches("input:not([type=checkbox]):not([type=radio])")) event.preventDefault();
+  });
+  form.querySelector("[data-recalc]").hidden = true;
+  form.addEventListener("input", (event) => {
+    const box = event.target;
+    update(box.type === "checkbox" && box.checked ? { i: box.dataset.i, p: box.dataset.p } : null);
+  });
+`;
 
 export type PayDraft = { to: string; amount: string; message?: string };
 

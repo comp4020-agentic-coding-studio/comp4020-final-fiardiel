@@ -63,6 +63,28 @@ export function itemShares(items: Item[], payerId: number): Share[] {
   return [...sums].map(([personId, cents]) => ({ personId, cents }));
 }
 
+// A fee or credit on the whole receipt (a surcharge, rounding, a discount on
+// the whole shop), shared in proportion to what each person had. The cents
+// that don't divide evenly go to the payer if they're on the bill, otherwise
+// to the first person, as in equalSplit, so the shares still add up exactly.
+// With nothing to share it by, it is all the payer's.
+export function withFees(shares: Share[], feeCents: number, payerId: number): Share[] {
+  if (feeCents === 0) return shares;
+  const base = shares.reduce((sum, s) => sum + s.cents, 0);
+  if (base <= 0) {
+    const payer = shares.find((s) => s.personId === payerId);
+    return payer === undefined
+      ? [...shares, { personId: payerId, cents: feeCents }]
+      : shares.map((s) => (s === payer ? { ...s, cents: s.cents + feeCents } : s));
+  }
+  const sign = Math.sign(feeCents);
+  const out = shares.map((s) => ({ personId: s.personId, cents: s.cents + sign * Math.floor((Math.abs(feeCents) * Math.max(s.cents, 0)) / base) }));
+  const given = out.reduce((sum, s, i) => sum + s.cents - shares[i].cents, 0);
+  const gets = out.find((s) => s.personId === payerId) ?? out[0];
+  gets.cents += feeCents - given;
+  return out;
+}
+
 // What each other person owes `me`, pair by pair: positive means they owe me,
 // negative means I owe them. Only received payments count. Derived from the
 // record every time, never stored.

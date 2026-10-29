@@ -255,12 +255,23 @@ describe("bill items", () => {
     expect(store.addBill(code, rafi, "", [{ personId: rafi, cents: 300 }], items)).toBeNull();
   });
 
+  it("keeps the fees shared across a receipt with the bill", () => {
+    const store = memory();
+    const code = store.createHouse();
+    const rafi = joinOk(store, code, "Rafi").person.id;
+    const items = [{ name: "Milk", cents: 300, people: [rafi] }];
+    const fees = [{ name: "Card surcharge", cents: 12 }, { name: "Rounding", cents: -2 }];
+    store.addBill(code, rafi, "", [{ personId: rafi, cents: 310 }], items, fees);
+    expect(store.bills(code)[0].fees).toEqual(fees);
+  });
+
   it("gives a bill typed in by amount no items", () => {
     const store = memory();
     const code = store.createHouse();
     const rafi = joinOk(store, code, "Rafi").person.id;
     store.addBill(code, rafi, "", [{ personId: rafi, cents: 300 }]);
     expect(store.bills(code)[0].items).toEqual([]);
+    expect(store.bills(code)[0].fees).toEqual([]);
   });
 });
 

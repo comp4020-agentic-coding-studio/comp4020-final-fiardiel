@@ -39,6 +39,17 @@ describe("layout", () => {
     expect(d.querySelector('a[href="/readme/"]')).not.toBeNull();
     expect(d.title).toBe("Hello");
   });
+
+  it("runs each page's script in its own scope, so a page swapped in after a scan still runs its own", () => {
+    // After a receipt is read, the result page replaces the bill page in the
+    // same window, where the bill page's script already declared its names.
+    const window = new JSDOM(`<body><script>const form = "from the page before";</script></body>`, { runScripts: "dangerously" }).window;
+    const html = layout("Next", "<p>hi</p>", `const form = document.body; form.dataset.ran = "yes";`);
+    const script = window.document.createElement("script");
+    script.textContent = new JSDOM(html).window.document.querySelector("body script")?.textContent ?? "";
+    window.document.body.append(script);
+    expect(window.document.body.dataset.ran).toBe("yes");
+  });
 });
 
 const house = (over: Partial<HouseView> = {}): HouseView => ({

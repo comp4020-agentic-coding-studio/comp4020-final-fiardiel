@@ -8,8 +8,10 @@ import { hashPin, isPin, pinMatches } from "./pins.ts";
 import type { BillRecord, Item, PaymentRecord, PaymentStatus, Share } from "./money.ts";
 
 export type Person = { id: number; name: string };
-// `items` are the receipt lines a bill was split by; empty for a bill typed in by amount.
-export type Bill = BillRecord & { at: number; items: Item[] };
+// `items` are the receipt lines a bill was split by, and `fees` the charges on
+// the whole receipt shared in proportion; both empty for a bill typed in by amount.
+export type Fee = { name: string; cents: number };
+export type Bill = BillRecord & { at: number; items: Item[]; fees: Fee[] };
 export type Payment = PaymentRecord & { at: number };
 export type JoinOutcome =
   | { ok: true; person: Person; token: string }
@@ -58,6 +60,12 @@ const SCHEMA = `
     name text not null,
     cents integer not null,
     people text not null -- the ids of who shared it, as a JSON array
+  );
+  create table if not exists bill_fees (
+    id integer primary key autoincrement,
+    bill_id integer not null references bills(id) on delete cascade,
+    name text not null,
+    cents integer not null
   );
   create table if not exists payments (
     id integer primary key autoincrement,
@@ -203,7 +211,7 @@ export class Store {
   // A bill holds only the people with an amount above zero. It is refused when
   // nobody is left, when anyone in it (payer included, and anyone on an item) is
   // not in this house, or when a person appears twice.
-  addBill(code: string, payerId: number, note: string, shares: Share[], items: Item[] = []): number | null {
+  addBill(code: string, payerId: number, note: string, shares: Share[], items: Item[] = [], fees: Fee[] = []): number | null {
     const kept = shares.filter((s) => s.cents !== 0);
     if (kept.length === 0 || !this.inHouse(code, payerId)) return null;
     if (new Set(kept.map((s) => s.personId)).size !== kept.length) return null;
@@ -215,6 +223,7 @@ export class Store {
       if (!Number.isInteger(item.cents) || Math.abs(item.cents) > MAX_CENTS) return null;
       if (!item.people.every((id) => this.inHouse(code, id))) return null;
     }
+    if (!fees.every((f) => Number.isInteger(f.cents) && Math.abs(f.cents) <= MAX_CENTS)) return null;
     this.db.exec("begin");
     try {
       const id = Number(
@@ -226,6 +235,8 @@ export class Store {
       for (const s of kept) insert.run(id, s.personId, s.cents);
       const insertItem = this.db.prepare("insert into bill_items (bill_id, name, cents, people) values (?, ?, ?, ?)");
       for (const item of items) insertItem.run(id, item.name, item.cents, JSON.stringify(item.people));
+      const insertFee = this.db.prepare("insert into bill_fees (bill_id, name, cents) values (?, ?, ?)");
+      for (const fee of fees) insertFee.run(id, fee.name, fee.cents);
       this.db.exec("commit");
       return id;
     } catch (error) {
@@ -298,6 +309,11 @@ export class Store {
       list.push({ name: i.name, cents: i.cents, people: JSON.parse(i.people) as number[] });
       items.set(i.bill_id, list);
     }
+    const feeRows = this.db
+      .prepare("select f.bill_id, f.name, f.cents from bill_fees f join bills b on b.id = f.bill_id where b.house_code = ? order by f.id")
+      .all(code) as { bill_id: number; name: string; cents: number }[];
+    const fees = new Map<number, Fee[]>();
+    for (const f of feeRows) fees.set(f.bill_id, [...(fees.get(f.bill_id) ?? []), { name: f.name, cents: f.cents }]);
     return rows.map((r) => ({
       id: r.id,
       paidBy: r.paid_by,
@@ -305,6 +321,7 @@ export class Store {
       at: r.created_at,
       shares: shares.get(r.id) ?? [],
       items: items.get(r.id) ?? [],
+      fees: fees.get(r.id) ?? [],
     }));
   }
 

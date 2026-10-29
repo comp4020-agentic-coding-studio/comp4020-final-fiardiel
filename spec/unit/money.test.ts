@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { balancesFor, equalSplit, formatCents, itemShares, parseCents, parseSignedCents, plainCents, signedPlainCents } from "../../src/money.ts";
+import { balancesFor, equalSplit, formatCents, itemShares, parseCents, parseSignedCents, plainCents, signedPlainCents, withFees } from "../../src/money.ts";
 import type { BillRecord, PaymentRecord } from "../../src/money.ts";
 
 describe("parseCents", () => {
@@ -164,5 +164,33 @@ describe("itemShares", () => {
     );
     expect(shares.reduce((sum, s) => sum + s.cents, 0)).toBe(500);
     expect(shares.map((s) => s.cents).sort()).toEqual([250, 250]);
+  });
+});
+
+describe("withFees", () => {
+  const rafi = 1;
+  const dina = 2;
+  const ari = 3;
+  const sum = (shares: { cents: number }[]) => shares.reduce((s, x) => s + x.cents, 0);
+
+  it("shares a fee in proportion to what each person had, leftover cents to the payer", () => {
+    const shares = [{ personId: dina, cents: 555 }, { personId: ari, cents: 1356 }, { personId: rafi, cents: 414 }];
+    const out = withFees(shares, 12, rafi);
+    // 12 × 555/2325 = 2.86 → 2; 12 × 1356/2325 = 7.0 → 6.99 → 6; 12 × 414/2325 = 2.1 → 2; the 2 left go to Rafi.
+    expect(out).toEqual([{ personId: dina, cents: 557 }, { personId: ari, cents: 1362 }, { personId: rafi, cents: 418 }]);
+    expect(sum(out)).toBe(2325 + 12);
+  });
+
+  it("takes a whole-shop discount off in proportion, to the cent", () => {
+    const out = withFees([{ personId: dina, cents: 300 }, { personId: ari, cents: 100 }], -101, rafi);
+    expect(sum(out)).toBe(400 - 101);
+    // The payer isn't on this bill, so the cent that doesn't divide goes to the first person, as in equalSplit.
+    expect(out).toEqual([{ personId: dina, cents: 224 }, { personId: ari, cents: 75 }]);
+  });
+
+  it("gives the whole fee to the payer when there's nothing to share it by, and changes nothing for no fee", () => {
+    expect(withFees([], 50, rafi)).toEqual([{ personId: rafi, cents: 50 }]);
+    const shares = [{ personId: dina, cents: 300 }];
+    expect(withFees(shares, 0, rafi)).toEqual(shares);
   });
 });

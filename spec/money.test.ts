@@ -260,12 +260,13 @@ describe("bills split by item", () => {
       [`amount_${ids.Ari}`]: "50",
     });
     expect(res.status).toBe(303);
-    // Milk: 104 to the payer, 103 each; kecap: 260 each; the bag is ticked on nobody, so it's left out.
+    // Milk: 104 to the payer, 103 each; kecap: 260 each; nobody was given the
+    // bag, so it counts as the payer's own and the bill covers the whole receipt.
     expect(balancesOf(await housePage(code, cookies.Rafi))).toEqual(["Ari owes you $1.03", "Dina owes you $3.63"]);
     const [bill] = historyOf(await housePage(code, cookies.Dina));
-    expect(bill.total).toBe("$8.30");
+    expect(bill.total).toBe("$8.45");
     const text = textOf(await housePage(code, cookies.Dina));
     expect(text).toContain("Kecap manis");
-    expect(text).not.toContain("Plastic bag");
+    expect(text).toContain("Plastic bag");
   });
 });

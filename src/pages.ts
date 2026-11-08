@@ -80,6 +80,7 @@ const STYLE = `
     color-scheme: light dark;
     --paper: #f8f6f2; --card: #ffffff; --ink: #1f2430; --muted: #6f7684;
     --rule: #e6e3dd; --accent: #2f4fa2; --on-accent: #ffffff; --pill: #eceae5;
+    --pop: #c01a78; --on-pop: #ffffff;
     --owed: #2f4fa2; --owe: #b8643e; --strip-owed: #e6ebf7; --strip-owe: #f8e9e1;
     --bill-bg: #f5e9c4; --bill-ink: #74570d; --paid-bg: #ebdcf3; --paid-ink: #6b3d84;
     --danger: #b3261e; --on-danger: #ffffff;
@@ -88,6 +89,7 @@ const STYLE = `
     :root {
       --paper: #13161f; --card: #1d2230; --ink: #e8ebf5; --muted: #9aa2b5;
       --rule: #2c3346; --accent: #8aa6ff; --on-accent: #13161f; --pill: #2a3142;
+      --pop: #ff6fb8; --on-pop: #2a0a1a;
       --owed: #8aa6ff; --owe: #ef9a70; --strip-owed: #1d2847; --strip-owe: #3a2620;
       --bill-bg: #3a3118; --bill-ink: #e6c766; --paid-bg: #33263e; --paid-ink: #d2abe8;
       --danger: #ff6b66; --on-danger: #13161f;
@@ -104,6 +106,15 @@ const STYLE = `
   .sr { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
   ul { list-style: none; padding: 0; margin: 0; }
   :focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+  /* About is a quiet (i) in the top-right corner of every page. */
+  main { position: relative; }
+  .about { position: absolute; top: 1.6rem; right: 1.25rem; display: inline-flex; color: var(--muted); }
+  .about svg { width: 1.5rem; height: 1.5rem; }
+  .start { width: 100%; max-width: 20rem; margin: 0 auto; }
+  .start .or { display: flex; align-items: center; gap: 0.75rem; margin: 0 0 1rem; color: var(--muted); font-size: 0.85rem; }
+  .start .or::before, .start .or::after { content: ""; flex: 1; border-top: 1px solid var(--rule); }
+  .start button { width: 100%; }
+  .start button::before { content: "+ "; }
 
   /* Spacing keeps to three distances: about 8px between the parts of one
      thing, 12 to 16px between rows, and 24 to 32px between groups. */
@@ -261,16 +272,17 @@ const STYLE = `
   .dock .wide { width: 100%; display: inline-flex; align-items: center; justify-content: center; gap: 0.4rem; }
   .dock .wide svg, .chip-btn svg { width: 1.1rem; height: 1.1rem; }
   .chip-btn { gap: 0.35rem; }
-  .ring { --p: 0; flex: none; width: 2.5rem; height: 2.5rem; border-radius: 50%; background: conic-gradient(var(--accent) calc(var(--p) * 1turn), var(--rule) 0); display: inline-flex; align-items: center; justify-content: center; }
+  .chip-btn[data-all], .dock .wide[data-rest] { color: var(--pop); border-color: color-mix(in srgb, var(--pop) 60%, transparent); }
+  .ring { --p: 0; flex: none; width: 2.5rem; height: 2.5rem; border-radius: 50%; background: conic-gradient(var(--pop) calc(var(--p) * 1turn), var(--rule) 0); display: inline-flex; align-items: center; justify-content: center; }
   .ring::after { content: ""; width: 1.85rem; height: 1.85rem; border-radius: 50%; background: var(--card); }
   /* Adding the receipt: one big button, then a small receipt being read. */
   .card-title { margin: 0; font-weight: 650; }
-  .drop { display: flex; flex-direction: column; align-items: center; gap: 0.6rem; padding: 1.5rem 1rem; border: 2px dashed color-mix(in srgb, var(--muted) 45%, transparent); border-radius: 18px; text-align: center; cursor: pointer; }
+  .drop { display: flex; flex-direction: column; align-items: center; gap: 0.6rem; padding: 1.5rem 1rem; border: 2px dashed color-mix(in srgb, var(--pop) 55%, transparent); border-radius: 18px; background: color-mix(in srgb, var(--pop) 12%, transparent); text-align: center; cursor: pointer; }
   .drop input { position: absolute; width: 1px; height: 1px; opacity: 0; }
   .drop:has(input:focus-visible) { outline: 2px solid var(--accent); outline-offset: 2px; }
-  .drop.over { border-color: var(--accent); background: color-mix(in srgb, var(--accent) 8%, transparent); }
-  .drop strong { font-size: 1.05rem; }
-  .cam { width: 3.5rem; height: 3.5rem; border-radius: 50%; background: var(--accent); color: var(--on-accent); display: inline-flex; align-items: center; justify-content: center; }
+  .drop.over { border-color: var(--pop); background: color-mix(in srgb, var(--pop) 22%, transparent); }
+  .drop strong { font-size: 1.05rem; color: var(--pop); }
+  .cam { width: 3.5rem; height: 3.5rem; border-radius: 50%; background: var(--pop); color: var(--on-pop); display: inline-flex; align-items: center; justify-content: center; }
   .cam svg { width: 1.6rem; height: 1.6rem; }
   .reading { display: flex; flex-direction: column; align-items: center; gap: 0.75rem; padding: 0.5rem 0; text-align: center; }
   .reading p { margin: 0; max-width: 17rem; }
@@ -279,7 +291,7 @@ const STYLE = `
   .slip i.short { width: 60%; }
   .slip i.mid { width: 80%; }
   /* The scanner: a bright line with a glow, passing down the receipt and back. */
-  .slip .beam { position: absolute; left: -0.5rem; right: -0.5rem; top: 0; height: 3px; background: var(--accent); box-shadow: 0 0 10px 3px color-mix(in srgb, var(--accent) 70%, transparent), 0 -18px 18px 2px color-mix(in srgb, var(--accent) 25%, transparent); animation: beam 1.5s ease-in-out infinite alternate; }
+  .slip .beam { position: absolute; left: -0.5rem; right: -0.5rem; top: 0; height: 3px; background: var(--pop); box-shadow: 0 0 10px 3px color-mix(in srgb, var(--pop) 70%, transparent), 0 -18px 18px 2px color-mix(in srgb, var(--pop) 25%, transparent); animation: beam 1.5s ease-in-out infinite alternate; }
   @keyframes beam { from { top: 4%; } to { top: 88%; } }
   @keyframes busy { from { opacity: 0.25; } to { opacity: 0.75; } }
   .fix .price-row { display: grid; grid-template-columns: 1fr 6.5rem; align-items: center; gap: 0.75rem; padding: 0.375rem 0; border-bottom: 1px solid var(--rule); }
@@ -311,7 +323,7 @@ const STYLE = `
   .solo .middle form { width: 100%; margin: 0; }
   .solo .middle button { width: 100%; margin-top: 1rem; }
   .solo .middle [role="alert"] { width: 100%; text-align: left; }
-  .solo .foot { margin: 1.5rem 0 0; text-align: center; }
+  .solo .foot { margin: 2rem 0 0; text-align: center; }
   .solo .foot a { font-weight: 650; text-decoration: none; }
   .solo input { text-align: center; font-size: 1.15rem; min-height: 3rem; background: var(--card); }
   input.code { font: 700 1.4rem ui-monospace, Menlo, monospace; letter-spacing: 0.2em; text-transform: uppercase; }
@@ -357,8 +369,9 @@ export function layout(title: string, body: string, script = ""): string {
   </head>
   <body>
     <main>
+      <a class="about" href="/readme/" aria-label="About this app"><svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true"><circle cx="10" cy="10" r="7.5"/><path d="M10 9v5"/><circle cx="10" cy="6.3" r="0.6" fill="currentColor"/></svg></a>
 ${body}
-      <p class="quiet"><a href="/readme/">About this app</a></p>
+
     </main>
     ${script === "" ? "" : `<script>(() => {${script}})();</script>`}
   </body>
@@ -406,12 +419,12 @@ const CODE_INPUT = `<input class="code" name="code" required maxlength="12" auto
 
 // Home asks for one thing, the code; a device that knows you shows its houses
 // instead. Starting a house is the small thing at the foot.
-export function homePage(message?: string, mine: { code: string; name: string }[] = []): string {
+export function homePage(message?: string, mine: { code: string; name: string; id?: number }[] = []): string {
   const middle =
     mine.length === 0
       ? `          <form method="get" action="/join">${CODE_INPUT}<button type="submit">Go</button></form>`
       : `          <h2 class="sr">Your houses</h2>
-          <div class="houses">${mine.map((h) => `<a class="house" href="/h/${esc(h.code)}">${face({ id: 0, name: h.name })}<span><span class="code">${esc(h.code)}</span><small>as ${esc(h.name)}</small></span></a>`).join("")}</div>
+          <div class="houses">${mine.map((h) => `<a class="house" href="/h/${esc(h.code)}">${face({ id: h.id ?? 0, name: h.name })}<span><span class="code">${esc(h.code)}</span><small>as ${esc(h.name)}</small></span></a>`).join("")}</div>
           <form method="get" action="/join" style="margin-top:1.25rem">${CODE_INPUT}<button type="submit" class="secondary">Go</button></form>`;
   return solo(
     "Serumah",
@@ -420,7 +433,7 @@ export function homePage(message?: string, mine: { code: string; name: string }[
           ${alertLine(message)}
 ${middle}`,
     undefined,
-    `<form class="inline" method="post" action="/houses"><button type="submit" class="link">Start a new house</button></form>`,
+    `<form class="start" method="post" action="/houses"><p class="or">or</p><button type="submit" class="secondary">Start a new house</button></form>`,
   );
 }
 

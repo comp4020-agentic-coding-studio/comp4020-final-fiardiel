@@ -103,14 +103,14 @@ function readCookie(req: IncomingMessage, name: string): string | undefined {
 
 // Every house this browser has a person in. Cookies that are garbage, stale or
 // for another house's token identify nobody and are dropped.
-function myHouses(store: Store, req: IncomingMessage): { code: string; name: string }[] {
-  const found: { code: string; name: string }[] = [];
+function myHouses(store: Store, req: IncomingMessage): { code: string; name: string; id: number }[] {
+  const found: { code: string; name: string; id: number }[] = [];
   for (const part of (req.headers.cookie ?? "").split(";")) {
     const [key, ...rest] = part.trim().split("=");
     const code = key.match(/^person_([23456789A-HJ-NP-Z]{6})$/)?.[1];
     if (code === undefined) continue;
     const person = store.personByToken(code, rest.join("="));
-    if (person !== null) found.push({ code, name: person.name });
+    if (person !== null) found.push({ code, name: person.name, id: person.id });
   }
   return found;
 }

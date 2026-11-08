@@ -2,66 +2,47 @@
 
 ## Who it's for
 
-It's for the whole house: split billing, and later chore rotations. Bills come first because they are the main issue in my house. There are five of us, and we shop at different times, with different people, so splitting and owing happen a lot.
+It's for my house of five, who shop at different times, with different people.
 
-For example, I go to Coles one day and buy a lot. The next day Radit goes to Coles again and buys cleaning stuff. The day after, Budi buys the things we always forget, like sauces and fried shallots. Now Derrick and Aldi are confused about who to pay, and Budi and I don't remember either.
+I go to Coles one day and buy a lot. The next day Radit buys cleaning stuff. The day after, Budi buys the things we always forget, like sauces and fried shallots. Now Derrick and Aldi are confused about who to pay, and Budi and I don't remember either. The group chat fills up, and we either chase people or let the money go.
 
-Usually someone asks in the group chat, and there are a lot of messages. Imagine it builds up for six months. How many bills would be missed, and who would keep up? We'd either chase people or let it go, and the money would be gone. Everyone would feel awkward.
-
-That's where Serumah comes in: it remembers every bill and payment.
+Serumah remembers every bill and payment, and can read the receipt for you.
 
 ## What good means here
 
-Good means nobody is confused about who to pay who. We don't have to chase the others around, and we don't have to check the group chat for the bills. Instead the debts add up, so you can see who owes who, and the history shows what for.
+Good means nobody is confused about who to pay who, and nobody has to chase anyone. You can see who owes who, and the history shows what for: with a receipt, each person sees what they had.
 
-We are housemates and we trust each other. That's why there is no login, and it's also why a payment counts as soon as someone records it. If the money never arrived, the person who was paid can say so and it's removed.
-
-I don't want to nag, or blame anyone for owing. My housemates are good people; they just shouldn't be confused about who to pay.
+We are housemates and we trust each other. That's why there is no login, and why a payment counts as soon as someone records it; if the money never arrived, the person paid can say so. I don't want to nag, or blame anyone for owing.
 
 ## Getting in
 
-The house code gets you to the "Who's using Serumah?" screen, and then each name has a 4-digit PIN.
+The house code gets you to "Who's using Serumah?", and each name has a 4-digit PIN. The PIN stops someone tapping the wrong name by accident; it isn't a password, because we trust each other. If you forget it, you retype the house code and choose a new one, and everyone sees it changed.
 
-I chose a PIN instead of a login because the main purpose of it is to stop someone from tapping the wrong user by accident, on a shared laptop or on a phone that isn't signed in as that person. There are still no usernames and passwords because this app was made for housemates, and we still trust each other. If you forget your PIN, you can just type in the house's code and then choose a new PIN. A PIN reset is never silent: the house page shows "<name>'s PIN was changed", and then the old devices are signed out. PIN changes are shown to everyone in the history, so that we can see if there are mistaken PIN changes.
+## Reading receipts
 
-I still left out usernames and passwords, email reset, and lockout after wrong PINs. I left out usernames and passwords for the same reason as last time: we trust each other, and we trust that everyone's good people. Email reset requires third-party services, so it is left out. Lockout after wrong PINs is just annoying, as we can forget our PINs, and because of our policy of trusting each other.
+Take a photo of the receipt and Claude Haiku reads every line. Then pick each housemate and tap the lines they had, or share them all evenly. A promo comes off its own item, GST is never split because it's already in the prices, and a surcharge is shared in proportion to what each person had. Nothing is added until you tap Add bill. Photos go to Anthropic to be read and aren't stored; if reading fails, you type the bill in.
 
 ## What I chose not to build
 
-**Not built yet, because of time:**
+**Not built yet, because of time:** chores, and editing a bill (you delete it and add it again).
 
-- **Chores**, the second half of the house.
-- **Reading receipts (OCR).** The payer types the amounts.
-- **Editing a bill.** For now you delete it and add it again.
-
-**Left out on purpose:**
-
-- **Reminders**, because they nag.
-- **Logins**, because we trust each other.
-- **Simplifying debts.** Aldi would pay Budi $10 without knowing why, and have to dig through the history to find out.
-- **Everyone confirming each bill**, which would be annoying with so many bills.
+**Left out on purpose:** reminders, because they nag; logins, because we trust each other; simplifying debts, because Aldi would pay Budi $10 without knowing why; and everyone confirming each bill.
 
 ## What is enforced and what is judged
 
 **Enforced by checks in `spec/`:**
 
-- A payment counts as soon as it's recorded, and only the person paid can remove it.
-- Only the payer can delete their bill, and two taps at once only change things once.
-- An equal split adds up to the total, to the cent.
-- Balances are listed by name, never ranked by who owes the most.
-- No page says "overdue", "late" or "remind".
-- A change shows up on every open page in the house within a second, and never in another house.
+- Only the person paid can say a payment never arrived, and only the payer can delete a bill.
+- Every split, equal or from a receipt, adds up to the cent.
+- On a receipt, promos stay on their item, GST is never split, and fees are shared in proportion.
+- A receipt only fills in the form; nothing is added until Add bill.
+- Balances are listed by name, and no page says "overdue" or "remind".
+- A change shows on every open page in the house within a second, and never in another house.
 
-**Judged by looking:** whether a housemate can tell me who they owe, and how much, in about three seconds with the phone at arm's length.
-
-After the redesign I tried it on my phone, and in my opinion it passes.
+**Judged by looking:** whether a housemate can tell who they owe, and how much, in about three seconds at arm's length. I tried it on my phone, with a real receipt, and it passes.
 
 ## What I read and looked at
 
-This app is based on [Serumah](https://github.com/davinpwk), my housemate's Telegram bot that splits grocery bills, tracks debts and rotates chores each week.
+Serumah is based on my housemate's [Telegram bot](https://github.com/davinpwk) of the same name. [Splitwise](https://www.splitwise.com/) is for any group, with accounts, simplified debts and reminders; I left those out. Robin Sloan's ["An app can be a home-cooked meal"](https://www.robinsloan.com/notes/home-cooked-app/) is about an app for one family; Serumah is for one house.
 
-I looked at [Splitwise](https://www.splitwise.com/). It is made for any group, needs accounts, simplifies debts, sends reminders, and the free version allows three expenses a day. Serumah is tailor-made for the house: no login, no payment, only what the house needs.
-
-I read Robin Sloan's ["An app can be a home-cooked meal"](https://www.robinsloan.com/notes/home-cooked-app/). He built a messaging app just for his family. Like his app, Serumah removes the extra features and is made for one house only.
-
-(Optional) I already have a house for markers: house code `NR67SC`, names Marker 1, Marker 2 and Marker 3, all with PIN 2026.
+A house for markers: code `NR67SC`, names Marker 1, Marker 2 and Marker 3, all with PIN 2026.

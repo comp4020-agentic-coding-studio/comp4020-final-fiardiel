@@ -865,11 +865,32 @@ const RECEIPT_SCRIPT = `
   // The photo goes in the background, so this page keeps drawing the scanner
   // while Claude reads (Safari stops animating a page once a form submits).
   // The answer is the next page, so it replaces this one.
+  // A phone photo is several MB, too slow on weak mobile data for the server's
+  // 15-second upload limit, and Claude reads large photos scaled down anyway.
+  // So it's redrawn at most 2000px on the long side as a JPEG (a few hundred KB)
+  // before sending. If the browser can't, the original goes.
+  const shrink = async (file) => {
+    try {
+      const image = await createImageBitmap(file);
+      const scale = Math.min(1, 2000 / Math.max(image.width, image.height));
+      if (scale === 1 && file.size < 1500000) return file;
+      const canvas = document.createElement("canvas");
+      canvas.width = Math.round(image.width * scale);
+      canvas.height = Math.round(image.height * scale);
+      canvas.getContext("2d").drawImage(image, 0, 0, canvas.width, canvas.height);
+      const blob = await new Promise((done) => canvas.toBlob(done, "image/jpeg", 0.85));
+      return blob === null || blob.size >= file.size ? file : new File([blob], "receipt.jpg", { type: "image/jpeg" });
+    } catch {
+      return file;
+    }
+  };
   const read = async () => {
     drop.hidden = true;
     form.querySelector(".reading").hidden = false;
     try {
-      const res = await fetch(form.action, { method: "POST", body: new FormData(form) });
+      const body = new FormData(form);
+      body.set("photo", await shrink(input.files[0]));
+      const res = await fetch(form.action, { method: "POST", body });
       const html = await res.text();
       document.open();
       document.write(html);

@@ -1,10 +1,9 @@
 import { describe, expect, it } from "vitest";
 import { baseUrl, historyOf, housePage, send, setUpHouse } from "./helpers.ts";
 
-// The app under check runs without RECEIPT_HOUSES (CI never has it), so every
-// house here is one that isn't on the list: reading a receipt costs money, so
-// these houses must never see it or reach it.
-describe("reading receipts in a house that isn't on the list", () => {
+// The app under check runs without an Anthropic API key (CI never has one), so
+// reading receipts is off: no house may see it or reach it.
+describe("reading receipts when the server has no API key", () => {
   it("shows no receipt upload on the bill page", async () => {
     const { code, cookies } = await setUpHouse("Rafi", "Dina");
     const html = await (await send(`/h/${code}/bill`, { cookie: cookies.Rafi })).text();

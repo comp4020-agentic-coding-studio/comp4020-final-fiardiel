@@ -15,8 +15,9 @@ export type Reading = {
   gstCents: number;
 };
 export type ReadReceipt = (image: Buffer, mediaType: string) => Promise<Reading | null>;
-// Who may read receipts: the listed houses, each up to its daily limit.
-export type Receipts = { houses: Set<string>; limit: ScanLimit; read: ReadReceipt };
+// Every house may read receipts, each up to its daily limit. `read` throws when
+// Claude can't be reached and returns null when a photo can't be read.
+export type Receipts = { limit: ScanLimit; read: ReadReceipt };
 
 export const PHOTO_TYPES = new Set(["image/jpeg", "image/png", "image/webp", "image/gif"]);
 export const ITEMS_MAX = 60;

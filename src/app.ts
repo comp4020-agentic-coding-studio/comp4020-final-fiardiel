@@ -260,7 +260,7 @@ function broadcast(store: Store, hub: Hub, code: string): void {
   logAction(store.houseLabel(code), null, "broadcast", { clients: hub.count(code) });
 }
 
-// `receipts` is null unless the server has a Claude key and a list of houses.
+// `receipts` is null unless the server has a Claude key.
 export function createHandler(store: Store, hub: Hub, receipts: Receipts | null = null) {
   return async (req: IncomingMessage, res: ServerResponse): Promise<void> => {
     try {
@@ -400,7 +400,7 @@ async function house(
     logAction(label, me, "snapshot", { page: "history" });
     return sendHtml(res, 200, historyPage(viewFor(store, code, me)));
   }
-  const scan = receipts?.houses.has(code) ?? false;
+  const scan = receipts !== null;
   if (method === "GET" && action === "bill") return sendHtml(res, 200, billPage(viewFor(store, code, me), undefined, scan));
   if (method === "GET" && action === "pay") return sendHtml(res, 200, payPage(viewFor(store, code, me)));
   if (method === "POST" && action === "bill") {
@@ -480,8 +480,8 @@ async function house(
     return redirect(res, `/h/${code}`);
   }
   if (method === "POST" && action === "receipt") {
-    // A house not on the list gets nothing here, and nothing is spent.
-    if (receipts === null || !scan) throw new HttpError(404, "There's nothing at this address.");
+    // Without a Claude key there's nothing here, and nothing is spent.
+    if (receipts === null) throw new HttpError(404, "There's nothing at this address.");
     const everyone = store.people(code).map((p) => p.id);
     const typeInstead = (status: number, message: string): void => {
       logAction(label, me, "rejected", { status, reason: message });
@@ -496,11 +496,15 @@ async function house(
       return typeInstead(429, `This house has read ${receipts.limit.perDay} receipts today, the most for one day. Type the amounts instead.`);
     }
     // The photo itself is never logged or kept.
-    const reading = await receipts.read(Buffer.from(await photo.arrayBuffer()), photo.type).catch((error: unknown) => {
+    // Claude out of credit, rate-limited or down: say so and leave the form for typing.
+    let reading;
+    try {
+      reading = await receipts.read(Buffer.from(await photo.arrayBuffer()), photo.type);
+    } catch (error) {
       console.error(`[${label}] reading a receipt failed: ${String(error)}`);
-      return null;
-    });
-    if (reading === null) return typeInstead(502, "Serumah couldn't read that receipt. Type the amounts instead.");
+      return typeInstead(503, "Reading receipts isn't available right now. Type the bill in below.");
+    }
+    if (reading === null) return typeInstead(422, "Serumah couldn't read that receipt. Try a clearer photo, or type the bill in below.");
     logAction(label, me, "read_receipt", { cents: reading.totalCents, items: reading.items.length });
     // Every line starts with nobody; the payer says who had it, person by person.
     const draft: Draft = {

@@ -15,20 +15,17 @@ const dataDir = process.env.DATA_DIR ?? "data";
 const store = new Store(join(dataDir, "serumah.db"));
 const hub = new Hub();
 
-// Reading receipts costs money, so it is off unless both are set (as Fly secrets):
-// ANTHROPIC_API_KEY, and RECEIPT_HOUSES, the house codes allowed, comma-separated.
-// RECEIPT_DAILY is how many each house may read a day (10 if unset).
-const receiptHouses = new Set((process.env.RECEIPT_HOUSES ?? "").split(",").map((c) => c.trim().toUpperCase()).filter((c) => c !== ""));
+// Reading receipts is on for every house when ANTHROPIC_API_KEY is set (a Fly
+// secret); the key's monthly spend limit is the hard cap on cost. RECEIPT_DAILY
+// is how many each house may read a day (10 if unset).
 const perDay = Number(process.env.RECEIPT_DAILY ?? "10");
-const receipts =
-  process.env.ANTHROPIC_API_KEY && receiptHouses.size > 0
-    ? {
-        houses: receiptHouses,
-        limit: new ScanLimit(Number.isInteger(perDay) && perDay > 0 ? perDay : 10),
-        read: claudeReader(new Anthropic({ timeout: 60_000, maxRetries: 1 })),
-      }
-    : null;
-console.log(receipts === null ? "reading receipts is off" : `reading receipts is on for ${receiptHouses.size} house(s)`);
+const receipts = process.env.ANTHROPIC_API_KEY
+  ? {
+      limit: new ScanLimit(Number.isInteger(perDay) && perDay > 0 ? perDay : 10),
+      read: claudeReader(new Anthropic({ timeout: 60_000, maxRetries: 1 })),
+    }
+  : null;
+console.log(receipts === null ? "reading receipts is off" : "reading receipts is on");
 
 const server = createServer({ connectionsCheckingInterval: 2000 }, createHandler(store, hub, receipts));
 // A request that has not fully arrived after this long is dropped. This covers the

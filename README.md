@@ -63,3 +63,5 @@ This app is based on [Serumah](https://github.com/davinpwk), my housemate's Tele
 I looked at [Splitwise](https://www.splitwise.com/). It is made for any group, needs accounts, simplifies debts, sends reminders, and the free version allows three expenses a day. Serumah is tailor-made for the house: no login, no payment, only what the house needs.
 
 I read Robin Sloan's ["An app can be a home-cooked meal"](https://www.robinsloan.com/notes/home-cooked-app/). He built a messaging app just for his family. Like his app, Serumah removes the extra features and is made for one house only.
+
+(Optional) I already have a house for markers: house code `NR67SC`, names Marker 1, Marker 2 and Marker 3, all with PIN 2026.

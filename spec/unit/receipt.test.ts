@@ -88,7 +88,7 @@ describe("POST /h/<code>/receipt", () => {
     const rafi = join(listed, "Rafi");
     const dina = join(listed, "Dina");
     const elsewhere = join(other, "Ari");
-    const server = createServer(createHandler(store, new Hub(), { houses: new Set([listed]), limit: new ScanLimit(perDay), read }));
+    const server = createServer(createHandler(store, new Hub(), { limit: new ScanLimit(perDay), read }));
     await new Promise<void>((r) => server.listen(0, "127.0.0.1", r));
     open.push({ close: () => (server.close(), store.close()) });
     const base = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
@@ -348,17 +348,12 @@ describe("POST /h/<code>/receipt", () => {
     expect(store.bills(listed)).toEqual([]);
   });
 
-  it("is not there for a house that isn't on the list", async () => {
-    let calls = 0;
-    const { base, other, elsewhere, scan } = await app(async () => (calls++, reading));
-    expect(await (await fetch(`${base}/h/${other}/bill`, { headers: { cookie: elsewhere } })).text()).not.toContain('type="file"');
-    expect((await scan(other, elsewhere)).status).toBe(404);
-    expect(calls).toBe(0);
-  });
-
-  it("shows the upload in a listed house", async () => {
-    const { base, listed, rafi } = await app(async () => reading);
-    expect(await (await fetch(`${base}/h/${listed}/bill`, { headers: { cookie: rafi } })).text()).toContain('type="file"');
+  it("is there in every house", async () => {
+    const { base, listed, other, rafi, elsewhere, scan } = await app(async () => reading);
+    for (const [code, cookie] of [[listed, rafi], [other, elsewhere]]) {
+      expect(await (await fetch(`${base}/h/${code}/bill`, { headers: { cookie } })).text()).toContain('type="file"');
+    }
+    expect((await scan(other, elsewhere)).status).toBe(200);
   });
 
   it("stops at the daily limit without calling Claude", async () => {
@@ -378,13 +373,26 @@ describe("POST /h/<code>/receipt", () => {
     expect(calls).toBe(0);
   });
 
-  it("says so when the receipt can't be read, and leaves the form for typing", async () => {
+  // Out of credit, rate-limited or down: the reader throws.
+  it("says reading isn't available when Claude can't be reached, with the form there to type the bill", async () => {
     const { listed, rafi, scan } = await app(async () => {
-      throw new Error("API down");
+      throw new Error("Your credit balance is too low to access the Anthropic API.");
     });
     const res = await scan(listed, rafi);
-    expect(res.status).toBe(502);
-    expect(doc(await res.text()).body.textContent).toContain("couldn't read that receipt");
+    expect(res.status).toBe(503);
+    const d = doc(await res.text());
+    expect(d.querySelector('[role="alert"]')?.textContent).toBe("Reading receipts isn't available right now. Type the bill in below.");
+    expect(d.querySelector('form[action$="/bill"] input[name="note"]')).not.toBeNull();
+    expect(d.querySelector('input[name^="amount_"]')).not.toBeNull();
+  });
+
+  it("says so when a photo can't be read, with the form there to type the bill", async () => {
+    const { listed, rafi, scan } = await app(async () => null);
+    const res = await scan(listed, rafi);
+    expect(res.status).toBe(422);
+    const d = doc(await res.text());
+    expect(d.querySelector('[role="alert"]')?.textContent).toBe("Serumah couldn't read that receipt. Try a clearer photo, or type the bill in below.");
+    expect(d.querySelector('input[name^="amount_"]')).not.toBeNull();
   });
 
   it("needs someone signed in to the house", async () => {
